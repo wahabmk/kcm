@@ -28,6 +28,7 @@ spec:
         - --insecure-diagnostics=false
         - --use-deprecated-infra-machine-naming=false
         - --feature-gates=MachinePool={{ .Values.expMachinePool }},ClusterResourceSet={{ .Values.expClusterResourceSet }},ClusterTopology={{ .Values.clusterTopology }},RuntimeSDK=false,MachineSetPreflightChecks=false
+        - --v=5
         command:
         - /manager
         env:

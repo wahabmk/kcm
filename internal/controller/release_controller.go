@@ -204,6 +204,7 @@ func (p *Poller) reconcileDefaultHelmRepo(ctx context.Context) error {
 	return nil
 }
 
+// wahab: helm chart install/upgrade
 func (p *Poller) reconcileHMCTemplates(ctx context.Context) error {
 	l := log.FromContext(ctx)
 	if !p.CreateTemplates {

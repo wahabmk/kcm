@@ -1,0 +1,36 @@
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: OCIRepository
+metadata:
+  name: nginx
+  # namespace: default
+  labels:
+    hmc.mirantis.com/managed: "true"
+spec:
+  interval: 10m
+  url: oci://registry-1.docker.io/bitnamicharts/nginx
+  ref:
+    semver: "18.1.0"
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: {{ include "cluster.name" . }}-nginx
+  labels:
+    hmc.mirantis.com/managed: "true"
+spec:
+  targetNamespace: nginx
+  storageNamespace: nginx
+  kubeConfig:
+    secretRef:
+      name: {{ include "cluster.name" . }}-kubeconfig # Cluster API creates this for the matching Cluster
+  interval: 10m
+  chartRef:
+    kind: OCIRepository
+    name: nginx
+    # namespace: default
+  # values:
+  #   replicaCount: 2
+  install:
+    createNamespace: true
+    remediation:
+      retries: -1

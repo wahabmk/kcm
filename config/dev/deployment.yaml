@@ -1,17 +1,19 @@
 apiVersion: hmc.mirantis.com/v1alpha1
 kind: Deployment
 metadata:
-  name: aws-dev
+  name: wali-aws-dev
 spec:
+  # There should be an nignx HelmRelease object under templates/aws-standalone-cp/templates/
+  # And flux in the Manager Cluster will use CAPI to create the actual nginx helm release in child cluster
   template: aws-standalone-cp
   config:
-    region: us-east-2
+    region: ca-central-1
     publicIP: true
     controlPlaneNumber: 1
     workersNumber: 1
     controlPlane:
-      amiID: ami-02f3416038bdb17fb
+      amiID: ami-0afef16a1bc0caf8e
       instanceType: t3.small
     worker:
-      amiID: ami-02f3416038bdb17fb
+      amiID: ami-0afef16a1bc0caf8e
       instanceType: t3.small
