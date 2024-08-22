@@ -7,5 +7,5 @@ manager:
 
 clusterTopology: false
 
-expClusterResourceSet: false
+expClusterResourceSet: true
 expMachinePool: false

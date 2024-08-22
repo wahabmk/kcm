@@ -204,6 +204,7 @@ func (r *TemplateReconciler) updateStatus(ctx context.Context, template *hmc.Tem
 	return nil
 }
 
+// wahab: helm chart install/upgrade
 func (r *TemplateReconciler) reconcileHelmChart(ctx context.Context, template *hmc.Template) (*sourcev1.HelmChart, error) {
 	if template.Spec.Helm.ChartRef != nil {
 		// HelmChart is not managed by the controller
