@@ -25,7 +25,9 @@ const (
 	BlockingFinalizer       = "hmc.mirantis.com/cleanup"
 	ManagedClusterFinalizer = "hmc.mirantis.com/managed-cluster"
 
-	FluxHelmChartNameKey = "helm.toolkit.fluxcd.io/name"
+	FluxHelmChartNameKey      = "helm.toolkit.fluxcd.io/name"
+	FluxHelmChartNamespaceKey = "helm.toolkit.fluxcd.io/namespace"
+
 	HMCManagedLabelKey   = "hmc.mirantis.com/managed"
 	HMCManagedLabelValue = "true"
 
@@ -60,6 +62,47 @@ const (
 	ProgressingReason string = "Progressing"
 )
 
+// //////////////////////////////////////////////////////////////////
+// ManagedClusterServiceSpec represents a service within managed cluster
+type ManagedClusterServiceSpec struct {
+	// Template is a reference to a Template object located in the same namespace.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Template string `json:"template"`
+	// Install tells if this service should be installed.
+	// +kubebuilder:default:=true
+	Install bool `json:"install"`
+	// ReleaseName is the chart release.
+	// +kubebuilder:validation:MinLength=1
+	ReleaseName string `json:"releaseName"`
+	// ReleaseNamespace is the namespace the release will be installed in.
+	// It will default to ReleaseName if not provided.
+	// +optional
+	ReleaseNamespace string `json:"releaseNamespace"`
+	// CreateNamespace create the release namespace if not present.
+	// It will defaults to true if not provided.
+	// +kubebuilder:default:=true
+	// +optional
+	CreateNamespace bool `json:"createNamespace"`
+	// RegistryConfig to provide options to interact with registry.
+	// +optional
+	RegistryConfig *ManagedClusterServiceRegistryConfig `json:"registryConfig,omitempty"`
+	// Values is the helm values to be passed to the template.
+	// +optional
+	Values string `json:"values,omitempty"`
+}
+
+type ManagedClusterServiceRegistryConfig struct {
+	// PlainHTTP indicates to use insecure HTTP connections for the chart download
+	// +optional
+	PlainHTTP bool `json:"plainHTTP"`
+	// PlainHTTP indicates to use insecure HTTP connections for the chart download
+	// +optional
+	Insecure bool `json:"insecure"`
+}
+
+// //////////////////////////////////////////////////////////////////
+
 // ManagedClusterSpec defines the desired state of ManagedCluster
 type ManagedClusterSpec struct {
 	// DryRun specifies whether the template should be applied after validation or only validated.
@@ -74,6 +117,10 @@ type ManagedClusterSpec struct {
 	// the template and DryRun will be enabled.
 	// +optional
 	Config *apiextensionsv1.JSON `json:"config,omitempty"`
+	// Services is a list of services that could be installed on the
+	// target cluster created with the template.
+	// +optional
+	Services []ManagedClusterServiceSpec `json:"services,omitempty"`
 }
 
 // ManagedClusterStatus defines the observed state of ManagedCluster

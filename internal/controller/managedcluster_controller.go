@@ -46,6 +46,7 @@ import (
 
 	hmc "github.com/Mirantis/hmc/api/v1alpha1"
 	"github.com/Mirantis/hmc/internal/helm"
+	"github.com/Mirantis/hmc/internal/sveltos"
 	"github.com/Mirantis/hmc/internal/telemetry"
 )
 
@@ -82,6 +83,7 @@ var (
 	}
 )
 
+// WAHAB:
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *ManagedClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -270,55 +272,155 @@ func (r *ManagedClusterReconciler) Update(ctx context.Context, l logr.Logger, ma
 		Message: "Helm chart is valid",
 	})
 
-	if !managedCluster.Spec.DryRun {
-		hr, _, err := helm.ReconcileHelmRelease(ctx, r.Client, managedCluster.Name, managedCluster.Namespace, helm.ReconcileHelmReleaseOpts{
-			Values: managedCluster.Spec.Config,
+	l.Info("Not reconciling ManagedCluster because DryRun is enabled")
+	if managedCluster.Spec.DryRun {
+		return ctrl.Result{}, nil
+	}
+
+	hr, _, err := helm.ReconcileHelmRelease(ctx, r.Client, managedCluster.Name, managedCluster.Namespace, helm.ReconcileHelmReleaseOpts{
+		Values: managedCluster.Spec.Config,
+		OwnerReference: &metav1.OwnerReference{
+			APIVersion: hmc.GroupVersion.String(),
+			Kind:       hmc.ManagedClusterKind,
+			Name:       managedCluster.Name,
+			UID:        managedCluster.UID,
+		},
+		ChartRef: template.Status.ChartRef,
+	})
+	if err != nil {
+		apimeta.SetStatusCondition(managedCluster.GetConditions(), metav1.Condition{
+			Type:    hmc.HelmReleaseReadyCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  hmc.FailedReason,
+			Message: err.Error(),
+		})
+		return ctrl.Result{}, err
+	}
+
+	hrReadyCondition := fluxconditions.Get(hr, fluxmeta.ReadyCondition)
+	if hrReadyCondition != nil {
+		apimeta.SetStatusCondition(managedCluster.GetConditions(), metav1.Condition{
+			Type:    hmc.HelmReleaseReadyCondition,
+			Status:  hrReadyCondition.Status,
+			Reason:  hrReadyCondition.Reason,
+			Message: hrReadyCondition.Message,
+		})
+	}
+
+	requeue, err := r.setStatusFromClusterStatus(ctx, l, managedCluster)
+	if err != nil {
+		if requeue {
+			// WAHAB: Why do we need this, shouldn't just returning err automatically requeue?
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		} else {
+			return ctrl.Result{}, err
+		}
+	}
+
+	if requeue {
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	if !fluxconditions.IsReady(hr) {
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	return r.updateServices(ctx, l, managedCluster)
+}
+
+func (r *ManagedClusterReconciler) updateServices(ctx context.Context, l logr.Logger, mc *hmc.ManagedCluster) (result ctrl.Result, err error) {
+	opts := []sveltos.HelmChartOpts{}
+
+	// The ClusterProfile object will be updated with empty helm charts
+	// if len(mc.Spec.Services) == 0. This will result in the helm charts
+	// being uninstalled on matching clusters.
+	for _, svc := range mc.Spec.Services {
+		if !svc.Install {
+			l.Info(fmt.Sprintf("Skip adding Template (%s) to ClusterProfile (%s) because install=false", svc.Template, sveltos.ClusterProfileName(mc.Namespace, mc.Name)))
+			continue
+		}
+
+		tmpl := &hmc.ServiceTemplate{}
+		tmplRef := types.NamespacedName{Name: svc.Template, Namespace: mc.Namespace}
+		if err := r.Get(ctx, tmplRef, tmpl); err != nil {
+			// TODO: Set status here.
+			return ctrl.Result{}, fmt.Errorf("failed to get Template (%s)", tmplRef.String())
+		}
+
+		url, err := r.getHelmRepositoryURL(ctx, tmpl)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("could not get repository url: %w", err)
+		}
+
+		opts = append(opts, sveltos.HelmChartOpts{
+			// This URL can be retrieved from servicetemplate -> helmchart -> helmrepository -> spec.url
+			// RepositoryURL:  "oci://hmc-local-registry:5000/charts",
+			RepositoryURL:  url,
+			RepositoryName: tmpl.Spec.Helm.ChartName,
+			ChartName:      tmpl.Spec.Helm.ChartName,
+			ChartVersion:   tmpl.Spec.Helm.ChartVersion,
+			ReleaseName:    svc.ReleaseName,
+			Values:         svc.Values,
+			ReleaseNamespace: func() string {
+				if svc.ReleaseNamespace != "" {
+					return svc.ReleaseNamespace
+				}
+				return svc.ReleaseName
+			}(),
+			CreateNamespace: svc.CreateNamespace,
+			PlainHTTP:       svc.RegistryConfig.PlainHTTP,
+			Insecure:        svc.RegistryConfig.Insecure,
+		})
+	}
+
+	cp, _, err := sveltos.ReconcileClusterProfile(ctx, r.Client, mc.Namespace, mc.Name,
+		map[string]string{
+			hmc.FluxHelmChartNamespaceKey: mc.Namespace,
+			hmc.FluxHelmChartNameKey:      mc.Name,
+		},
+		sveltos.ReconcileClusterProfileOpts{
 			OwnerReference: &metav1.OwnerReference{
 				APIVersion: hmc.GroupVersion.String(),
 				Kind:       hmc.ManagedClusterKind,
-				Name:       managedCluster.Name,
-				UID:        managedCluster.UID,
+				Name:       mc.Name,
+				UID:        mc.UID,
 			},
-			ChartRef: template.Status.ChartRef,
+			HelmChartOpts: opts,
 		})
-		if err != nil {
-			apimeta.SetStatusCondition(managedCluster.GetConditions(), metav1.Condition{
-				Type:    hmc.HelmReleaseReadyCondition,
-				Status:  metav1.ConditionFalse,
-				Reason:  hmc.FailedReason,
-				Message: err.Error(),
-			})
-			return ctrl.Result{}, err
-		}
-
-		hrReadyCondition := fluxconditions.Get(hr, fluxmeta.ReadyCondition)
-		if hrReadyCondition != nil {
-			apimeta.SetStatusCondition(managedCluster.GetConditions(), metav1.Condition{
-				Type:    hmc.HelmReleaseReadyCondition,
-				Status:  hrReadyCondition.Status,
-				Reason:  hrReadyCondition.Reason,
-				Message: hrReadyCondition.Message,
-			})
-		}
-
-		requeue, err := r.setStatusFromClusterStatus(ctx, l, managedCluster)
-		if err != nil {
-			if requeue {
-				return ctrl.Result{RequeueAfter: 10 * time.Second}, err
-			} else {
-				return ctrl.Result{}, err
-			}
-		}
-
-		if requeue {
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		}
-
-		if !fluxconditions.IsReady(hr) {
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		}
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to create ClusterProfile: %w", err)
 	}
+
+	l.Info(fmt.Sprintf("Successfully created ClusterProfile (%s)", cp.Name))
 	return ctrl.Result{}, nil
+}
+
+func (r *ManagedClusterReconciler) getHelmRepositoryURL(ctx context.Context, tmpl *hmc.ServiceTemplate) (string, error) {
+	tmplRef := types.NamespacedName{Namespace: tmpl.Namespace, Name: tmpl.Name}
+
+	if tmpl.Status.ChartRef == nil {
+		return "", fmt.Errorf("status for ServiceTemplate (%s) has not been updated yet", tmplRef.String())
+	}
+
+	chart := &sourcev1.HelmChart{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: tmpl.Status.ChartRef.Namespace,
+		Name:      tmpl.Spec.Helm.ChartName,
+	}, chart); err != nil {
+		return "", fmt.Errorf("failed to get HelmChart (%s)", tmplRef.String())
+	}
+
+	repo := &sourcev1.HelmRepository{}
+	if err := r.Get(ctx, types.NamespacedName{
+		// Using chart's namespace because it's source
+		// (helm repository in this case) should be within the same namespace.
+		Namespace: chart.Namespace,
+		Name:      chart.Spec.SourceRef.Name,
+	}, repo); err != nil {
+		return "", fmt.Errorf("failed to get HelmRepository (%s)", tmplRef.String())
+	}
+
+	return repo.Spec.URL, nil
 }
 
 func (r *ManagedClusterReconciler) validateReleaseWithValues(ctx context.Context, actionConfig *action.Configuration, managedCluster *hmc.ManagedCluster, hcChart *chart.Chart) error {
@@ -409,6 +511,12 @@ func (r *ManagedClusterReconciler) Delete(ctx context.Context, l logr.Logger, ma
 		}
 		return ctrl.Result{}, err
 	}
+
+	err = sveltos.DeleteClusterProfile(ctx, r.Client, managedCluster.Namespace, managedCluster.Name)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	l.Info(fmt.Sprintf("Issued delete on ClusterProfile (%s)", sveltos.ClusterProfileName(managedCluster.Namespace, managedCluster.Name)))
 
 	err = helm.DeleteHelmRelease(ctx, r.Client, managedCluster.Name, managedCluster.Namespace)
 	if err != nil {
