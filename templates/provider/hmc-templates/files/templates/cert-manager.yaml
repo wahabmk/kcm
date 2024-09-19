@@ -1,0 +1,8 @@
+apiVersion: hmc.mirantis.com/v1alpha1
+kind: ServiceTemplate
+metadata:
+  name: cert-manager
+spec:
+  helm:
+    chartName: cert-manager
+    chartVersion: 1.12.3

@@ -1,0 +1,38 @@
+projectsveltos:
+  accessManager:
+    manager:
+      image:
+        repository: msr.ci.mirantis.com/projectsveltos/access-manager
+  addonController:
+    controller:
+      image:
+        repository: msr.ci.mirantis.com/projectsveltos/addon-controller
+        tag: v0.38.1-dev-plain-http
+  classifierManager:
+    manager:
+      image:
+        repository: msr.ci.mirantis.com/projectsveltos/classifier
+  conversionWebhook:
+    sveltosWebhook:
+      image:
+        repository: msr.ci.mirantis.com/projectsveltos/webhook-conversion
+  eventManager:
+    manager:
+      image:
+        repository: msr.ci.mirantis.com/projectsveltos/event-manager
+  hcManager:
+    manager:
+      image:
+        repository: msr.ci.mirantis.com/projectsveltos/healthcheck-manager
+  registerMgmtClusterJob:
+    registerMgmtCluster:
+      image:
+        repository: msr.ci.mirantis.com/projectsveltos/register-mgmt-cluster
+  scManager:
+    manager:
+      image:
+        repository: msr.ci.mirantis.com/projectsveltos/sveltoscluster-manager
+  shardController:
+    manager:
+      image:
+        repository: msr.ci.mirantis.com/projectsveltos/shard-controller

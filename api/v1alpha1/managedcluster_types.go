@@ -60,6 +60,24 @@ const (
 	ProgressingReason string = "Progressing"
 )
 
+// //////////////////////////////////////////////////////////////////
+// ManagedClusterServiceSpec represents a service within managed cluster
+type ManagedClusterServiceSpec struct {
+	// Template is a reference to a Template object located in the same namespace.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Template string `json:"template"`
+	Install  bool   `json:"install"`
+	// Config allows to provide parameters for template customization.
+	// +optional
+	Config apiextensionsv1.JSON `json:"config,omitempty"`
+	// Values is the helm values to be passed to the template.
+	// +optional
+	Values apiextensionsv1.JSON `json:"values,omitempty"`
+}
+
+// //////////////////////////////////////////////////////////////////
+
 // ManagedClusterSpec defines the desired state of ManagedCluster
 type ManagedClusterSpec struct {
 	// DryRun specifies whether the template should be applied after validation or only validated.
@@ -74,6 +92,10 @@ type ManagedClusterSpec struct {
 	// the template and DryRun will be enabled.
 	// +optional
 	Config *apiextensionsv1.JSON `json:"config,omitempty"`
+	// Services is a list of services that could be installed on the
+	// target cluster created with the template.
+	// +optional
+	Services []ManagedClusterServiceSpec `json:"services,omitempty"`
 }
 
 // ManagedClusterStatus defines the observed state of ManagedCluster

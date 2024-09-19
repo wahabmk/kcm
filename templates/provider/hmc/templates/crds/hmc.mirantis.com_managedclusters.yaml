@@ -66,6 +66,34 @@ spec:
                 description: DryRun specifies whether the template should be applied
                   after validation or only validated.
                 type: boolean
+              services:
+                description: |-
+                  Services is a list of services that could be installed on the
+                  target cluster created with the template.
+                items:
+                  description: |-
+                    //////////////////////////////////////////////////////////////////
+                    ManagedClusterServiceSpec represents a service within managed cluster
+                  properties:
+                    config:
+                      description: Config allows to provide parameters for template
+                        customization.
+                      x-kubernetes-preserve-unknown-fields: true
+                    install:
+                      type: boolean
+                    template:
+                      description: Template is a reference to a Template object located
+                        in the same namespace.
+                      minLength: 1
+                      type: string
+                    values:
+                      description: Values is the helm values to be passed to the template.
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                  - install
+                  - template
+                  type: object
+                type: array
               template:
                 description: Template is a reference to a Template object located
                   in the same namespace.

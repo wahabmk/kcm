@@ -1,17 +1,34 @@
 apiVersion: hmc.mirantis.com/v1alpha1
 kind: ManagedCluster
 metadata:
-  name: aws-dev
+  name: wali-aws-dev
   namespace: ${NAMESPACE}
 spec:
   config:
     controlPlane:
+      amiID: ami-04e7552b5a2a47e47
       instanceType: t3.small
     controlPlaneNumber: 1
     publicIP: true
-    region: us-west-2
+    region: ca-central-1
     worker:
+      amiID: ami-04e7552b5a2a47e47
       instanceType: t3.small
     workersNumber: 1
     installBeachHeadServices: false
   template: aws-standalone-cp
+  services:
+    - template: kyverno
+      install: true
+      config:
+        releaseName: kyverno
+        releaseNamespace: kyverno
+        createNamespace: true
+  #   - template: cert-manager
+  #     install: false
+  #     config:
+  #       releaseName: cert-manager
+  #       releaseNamespace: cert-manager
+  #       createNamespace: true
+  #     values:
+  #       installCRDs: true

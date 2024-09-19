@@ -78,6 +78,7 @@ func (r *ClusterTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	return r.ReconcileTemplate(ctx, clusterTemplate)
 }
 
+// WAHAB: ServiceTemplateReconciler
 func (r *ServiceTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx).WithValues("ServiceTemplateReconciler", req.NamespacedName)
 	l.Info("Reconciling ServiceTemplate")

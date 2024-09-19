@@ -46,6 +46,7 @@ import (
 
 	hmc "github.com/Mirantis/hmc/api/v1alpha1"
 	"github.com/Mirantis/hmc/internal/helm"
+	"github.com/Mirantis/hmc/internal/sveltos"
 	"github.com/Mirantis/hmc/internal/telemetry"
 )
 
@@ -82,6 +83,7 @@ var (
 	}
 )
 
+// WAHAB:
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *ManagedClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -304,6 +306,7 @@ func (r *ManagedClusterReconciler) Update(ctx context.Context, l logr.Logger, ma
 		requeue, err := r.setStatusFromClusterStatus(ctx, l, managedCluster)
 		if err != nil {
 			if requeue {
+				// WAHAB: Why do we need this, shouldn't just returning err automatically requeue?
 				return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 			} else {
 				return ctrl.Result{}, err
@@ -317,6 +320,122 @@ func (r *ManagedClusterReconciler) Update(ctx context.Context, l logr.Logger, ma
 		if !fluxconditions.IsReady(hr) {
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
+
+		// ///////////////////////////////////////////////////////////////////////////////////////////////////////
+		// ///////////////////////////////////////////////////////////////////////////////////////////////////////
+		// profile := sveltosv1beta1.ClusterProfile{
+		// 	// TypeMeta: metav1.TypeMeta{
+		// 	// 	Kind:       "ClusterProfile",
+		// 	// 	APIVersion: "config.projectsveltos.io/v1beta1",
+		// 	// },
+		// 	ObjectMeta: metav1.ObjectMeta{
+		// 		Name:      managedCluster.Name,
+		// 		Namespace: managedCluster.Namespace,
+		// 	},
+		// 	Spec: sveltosv1beta1.Spec{
+		// 		ClusterSelector: libsveltosv1beta1.Selector{
+		// 			LabelSelector: metav1.LabelSelector{
+		// 				MatchLabels: map[string]string{
+		// 					"helm.toolkit.fluxcd.io/name":      managedCluster.Name,
+		// 					"helm.toolkit.fluxcd.io/namespace": managedCluster.Namespace,
+		// 				},
+		// 			},
+		// 		},
+		// 		// ClusterRefs: []corev1.ObjectReference{
+		// 		// 	{
+		// 		// 		Kind:      "Cluster",
+		// 		// 		Name:      managedCluster.GetName(),
+		// 		// 		Namespace: managedCluster.GetNamespace(),
+		// 		// 	},
+		// 		// },
+		// 	},
+		// }
+
+		opts := []sveltos.HelmChartOpts{}
+		for i, svc := range managedCluster.Spec.Services {
+			if !svc.Install {
+				continue
+			}
+
+			tmpl := &hmc.ServiceTemplate{}
+			tmplRef := types.NamespacedName{Name: svc.Template, Namespace: r.SystemNamespace}
+			if err := r.Get(ctx, tmplRef, tmpl); err != nil {
+				// WAHAB: You should continue and store the error so that other
+				// services have a chance to run as well. Then at the end of the loop
+				// return error if any one of them failed.
+				// Also might need to update the status here.
+				// return ctrl.Result{}, err
+				continue
+			}
+
+			/*
+				// README: https://projectsveltos.github.io/sveltos/addons/helm_charts/
+				url := fmt.Sprintf("oci://hmc-local-registry:5000/charts/%s", tmpl.Spec.Helm.ChartName)
+				opts = append(opts, sveltos.HelmChartOpts{
+					// This URL can be retrieved from servicetemplate -> helmchart -> helmrepository -> spec.url
+					// RepositoryURL:    "oci://hmc-local-registry:5000/charts",
+					RepositoryURL:    url,
+					RepositoryName:   tmpl.Spec.Helm.ChartName,
+					ChartName:        url,
+					ChartVersion:     tmpl.Spec.Helm.ChartVersion,
+					ReleaseName:      tmpl.Spec.Helm.ChartName,
+					ReleaseNamespace: tmpl.Spec.Helm.ChartName,
+					CreateNamespace:  true,
+				})
+			*/
+
+			opts = append(opts, sveltos.HelmChartOpts{
+				// This URL can be retrieved from servicetemplate -> helmchart -> helmrepository -> spec.url
+				RepositoryURL:    "oci://hmc-local-registry:5000/charts",
+				RepositoryName:   tmpl.Spec.Helm.ChartName,
+				ChartName:        tmpl.Spec.Helm.ChartName,
+				ChartVersion:     tmpl.Spec.Helm.ChartVersion,
+				ReleaseName:      tmpl.Spec.Helm.ChartName,
+				ReleaseNamespace: tmpl.Spec.Helm.ChartName,
+				CreateNamespace:  true,
+			})
+
+			// profile.Spec.HelmCharts = append(profile.Spec.HelmCharts, sveltosv1beta1.HelmChart{
+			// 	// This URL can be retrieved from servicetemplate -> helmchart -> helmrepository -> spec.url
+			// 	RepositoryURL:    "oci://hmc-local-registry:5000/charts",
+			// 	RepositoryName:   tmpl.Spec.Helm.ChartName,
+			// 	ChartName:        tmpl.Spec.Helm.ChartName,
+			// 	ChartVersion:     tmpl.Spec.Helm.ChartVersion,
+			// 	ReleaseName:      tmpl.Spec.Helm.ChartName,
+			// 	ReleaseNamespace: tmpl.Spec.Helm.ChartName,
+			// 	HelmChartAction:  sveltosv1beta1.HelmChartActionInstall,
+			// 	Options: &sveltosv1beta1.HelmOptions{
+			// 		InstallOptions: sveltosv1beta1.HelmInstallOptions{
+			// 			CreateNamespace: true, // defaults to true
+			// 		},
+			// 	},
+			// })
+
+			fmt.Printf("\n\n>>>>>>>>>>>>>>>>> %d) template=%s, install=%v, config=%s, values=%s\n", i, svc.Template, svc.Install, string(svc.Config.Raw), string(svc.Values.Raw))
+			fmt.Printf("\n\n>>>>>>>>>>>>>>>>> %d) chartName=%s, chartVersion=%s, chartRef=%v, status.chartRef=%v\n\n", i, tmpl.Spec.Helm.ChartName, tmpl.Spec.Helm.ChartVersion, tmpl.Spec.Helm.ChartRef, tmpl.Status.ChartRef)
+
+		}
+
+		_, res, err := sveltos.ReconcileClusterProfile(ctx, r.Client, managedCluster.Name, managedCluster.Namespace, sveltos.ReconcileClusterProfileOpts{
+			OwnerReference: &metav1.OwnerReference{
+				APIVersion: hmc.GroupVersion.String(),
+				Kind:       hmc.ManagedClusterKind,
+				Name:       managedCluster.Name,
+				UID:        managedCluster.UID,
+			},
+			HelmChartOpts: opts,
+		})
+		// res, err := ctrl.CreateOrUpdate(ctx, r.Client, &profile, func() error {
+		// 	return nil
+		// })
+		fmt.Printf("\n###################################### OperationResult=%s, Reported Err=%s", res, err)
+		if err != nil {
+			fmt.Printf("\n###################################### failed to create clusterprofile err = %s", err)
+			return ctrl.Result{}, fmt.Errorf("failed to create cluster profile: %w", err)
+		}
+
+		// ///////////////////////////////////////////////////////////////////////////////////////////////////////
+		// ///////////////////////////////////////////////////////////////////////////////////////////////////////
 	}
 	return ctrl.Result{}, nil
 }

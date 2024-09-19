@@ -1,0 +1,12 @@
+apiVersion: v2
+name: cert-manager
+description: A Helm chart to refer the official cert-manager helm chart
+type: application
+version: 1.12.3
+appVersion: "1.12.3"
+dependencies:
+  - name: cert-manager
+    version: 1.12.3
+    repository: https://charts.jetstack.io
+annotations:
+  hmc.mirantis.com/type: service

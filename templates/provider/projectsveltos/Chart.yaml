@@ -2,11 +2,15 @@ apiVersion: v2
 name: projectsveltos
 description: A Helm chart to refer the official projectsveltos helm chart
 type: application
-version: 0.38.1
+version: 0.38.1-dev
 appVersion: "0.38.1"
 dependencies:
   - name: projectsveltos
-    version: 0.38.1
-    repository: https://projectsveltos.github.io/helm-charts
+    version: 0.38.1-dev
+    # repository: https://projectsveltos.github.io/helm-charts
+    repository: https://msr.ci.mirantis.com/charts/projectsveltos/helm-charts
 annotations:
   hmc.mirantis.com/type: provider
+
+
+# helm template projectsveltos --repo https://msr.ci.mirantis.com/charts/projectsveltos/helm-charts --version 0.38.1-dev
