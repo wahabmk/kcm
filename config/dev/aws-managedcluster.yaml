@@ -15,3 +15,20 @@ spec:
     workersNumber: 1
     installBeachHeadServices: false
   template: aws-standalone-cp
+  services:
+    - template: kyverno
+      install: true # defaults to true
+      releaseName: kyverno
+      releaseNamespace: kyverno # defaults to releaseName
+      createNamespace: true # defaults to true
+      registryConfig:
+        plainHTTP: true
+    - template: ingress-nginx
+      install: true
+      releaseName: ingress-nginx
+      releaseNamespace: ingress-nginx
+      createNamespace: false
+      values: |
+        fullnameOverride: ingress-nginx
+      registryConfig:
+        plainHTTP: true
