@@ -18,52 +18,47 @@ import (
 	"context"
 	"fmt"
 
+	hmc "github.com/Mirantis/hmc/api/v1alpha1"
 	sveltosv1beta1 "github.com/projectsveltos/addon-controller/api/v1beta1"
 	libsveltosv1beta1 "github.com/projectsveltos/libsveltos/api/v1beta1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-
-	hmc "github.com/Mirantis/hmc/api/v1alpha1"
+	"sigs.k8s.io/yaml"
 )
 
-type ReconcileClusterProfileOpts struct {
+type ReconcileProfileOpts struct {
 	OwnerReference *metav1.OwnerReference
 	HelmChartOpts  []HelmChartOpts
 }
 
 type HelmChartOpts struct {
-	RepositoryURL    string
-	RepositoryName   string
-	ChartName        string
-	ChartVersion     string
-	ReleaseName      string
-	ReleaseNamespace string
-	Values           string
-	CreateNamespace  bool
-	PlainHTTP        bool
-	Insecure         bool
+	RepositoryURL         string
+	RepositoryName        string
+	ChartName             string
+	ChartVersion          string
+	ReleaseName           string
+	ReleaseNamespace      string
+	Values                *apiextensionsv1.JSON
+	PlainHTTP             bool
+	InsecureSkipTLSVerify bool
 }
 
-// ClusterProfileName returns a cluster-wide unique name for ClusterProfile object.
-func ClusterProfileName(namespace string, name string) string {
-	return fmt.Sprintf("%s-%s", namespace, name)
-}
-
-// ReconcileClusterProfile reconciles a Sveltos ClusterProfile object.
-func ReconcileClusterProfile(ctx context.Context,
+// ReconcileProfile reconciles a Sveltos Profile object.
+func ReconcileProfile(ctx context.Context,
 	cl client.Client,
 	namespace string,
 	name string,
 	matchLabels map[string]string,
-	opts ReconcileClusterProfileOpts,
-) (*sveltosv1beta1.ClusterProfile, controllerutil.OperationResult, error) {
+	opts ReconcileProfileOpts,
+) (*sveltosv1beta1.Profile, controllerutil.OperationResult, error) {
 
-	cp := &sveltosv1beta1.ClusterProfile{
+	cp := &sveltosv1beta1.Profile{
 		ObjectMeta: metav1.ObjectMeta{
-			// ClusterProfile has cluster scope so not setting namespace.
-			Name: ClusterProfileName(namespace, name),
+			Namespace: namespace,
+			Name:      name,
 		},
 	}
 
@@ -86,25 +81,40 @@ func ReconcileClusterProfile(ctx context.Context,
 		}
 
 		for _, hc := range opts.HelmChartOpts {
-			cp.Spec.HelmCharts = append(cp.Spec.HelmCharts, sveltosv1beta1.HelmChart{
+			helmChart := sveltosv1beta1.HelmChart{
 				RepositoryURL:    hc.RepositoryURL,
 				RepositoryName:   hc.RepositoryName,
 				ChartName:        hc.ChartName,
 				ChartVersion:     hc.ChartVersion,
 				ReleaseName:      hc.ReleaseName,
 				ReleaseNamespace: hc.ReleaseNamespace,
-				Values:           hc.Values,
 				HelmChartAction:  sveltosv1beta1.HelmChartActionInstall,
-				Options: &sveltosv1beta1.HelmOptions{
-					InstallOptions: sveltosv1beta1.HelmInstallOptions{
-						CreateNamespace: hc.CreateNamespace,
-					},
-				},
 				RegistryCredentialsConfig: &sveltosv1beta1.RegistryCredentialsConfig{
 					PlainHTTP:             hc.PlainHTTP,
-					InsecureSkipTLSVerify: hc.Insecure,
+					InsecureSkipTLSVerify: hc.InsecureSkipTLSVerify,
 				},
-			})
+			}
+
+			if hc.PlainHTTP {
+				// The InsecureSkipTLSVerify field is redundant in this case.
+				helmChart.RegistryCredentialsConfig.InsecureSkipTLSVerify = false
+			}
+
+			if hc.Values != nil {
+				b, err := hc.Values.MarshalJSON()
+				if err != nil {
+					return fmt.Errorf("failed to marshal values to JSON for service (%s) in ManagedCluster: %w", hc.RepositoryName, err)
+				}
+
+				b, err = yaml.JSONToYAML(b)
+				if err != nil {
+					return fmt.Errorf("failed to convert values from JSON to YAML for service (%s) in ManagedCluster: %w", hc.RepositoryName, err)
+				}
+
+				helmChart.Values = string(b)
+			}
+
+			cp.Spec.HelmCharts = append(cp.Spec.HelmCharts, helmChart)
 		}
 		return nil
 	})
@@ -115,17 +125,13 @@ func ReconcileClusterProfile(ctx context.Context,
 	return cp, operation, nil
 }
 
-// DeleteClusterProfile issues delete on ClusterProfile object.
-func DeleteClusterProfile(ctx context.Context, cl client.Client, namespace string, name string) error {
-	err := cl.Delete(ctx, &sveltosv1beta1.ClusterProfile{
+func DeleteProfile(ctx context.Context, cl client.Client, namespace string, name string) error {
+	err := cl.Delete(ctx, &sveltosv1beta1.Profile{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: ClusterProfileName(namespace, name),
+			Namespace: namespace,
+			Name:      name,
 		},
 	})
 
-	if client.IgnoreNotFound(err) != nil {
-		return err
-	}
-
-	return nil
+	return client.IgnoreNotFound(err)
 }

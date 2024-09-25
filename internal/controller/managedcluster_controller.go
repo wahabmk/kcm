@@ -327,21 +327,22 @@ func (r *ManagedClusterReconciler) Update(ctx context.Context, l logr.Logger, ma
 		return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 	}
 
-	return r.updateServices(ctx, l, managedCluster)
+	return r.updateServices(ctx, managedCluster)
 }
 
 // updateServices reconciles services provided in ManagedCluster.Spec.Services.
 // TODO(https://github.com/Mirantis/hmc/issues/361): Set status to ManagedCluster object at appropriate places.
-func (r *ManagedClusterReconciler) updateServices(ctx context.Context, l logr.Logger, mc *hmc.ManagedCluster) (ctrl.Result, error) {
+func (r *ManagedClusterReconciler) updateServices(ctx context.Context, mc *hmc.ManagedCluster) (ctrl.Result, error) {
+	l := log.FromContext(ctx).WithValues("ManagedClusterController", fmt.Sprintf("%s/%s", mc.Namespace, mc.Name))
 	opts := []sveltos.HelmChartOpts{}
 
-	// NOTE: The ClusterProfile object will be updated with no helm
+	// NOTE: The Profile object will be updated with no helm
 	// charts if len(mc.Spec.Services) == 0. This will result in the
 	// helm charts being uninstalled on matching clusters if
-	// ClusterProfile originally had len(m.Spec.Sevices) > 0.
+	// Profile originally had len(m.Spec.Sevices) > 0.
 	for _, svc := range mc.Spec.Services {
-		if !svc.Install {
-			l.Info(fmt.Sprintf("Skip adding Template (%s) to ClusterProfile (%s) because install=false", svc.Template, sveltos.ClusterProfileName(mc.Namespace, mc.Name)))
+		if svc.Disable {
+			l.Info(fmt.Sprintf("Skip adding Template (%s) to Profile (%s) because Disable=true", svc.Template, mc.Name))
 			continue
 		}
 
@@ -351,36 +352,38 @@ func (r *ManagedClusterReconciler) updateServices(ctx context.Context, l logr.Lo
 			return ctrl.Result{}, fmt.Errorf("failed to get Template (%s)", tmplRef.String())
 		}
 
-		url, err := r.getServiceTemplateRepoURL(ctx, tmpl)
+		source, err := r.getServiceTemplateSource(ctx, tmpl)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("could not get repository url: %w", err)
 		}
 
 		opts = append(opts, sveltos.HelmChartOpts{
-			RepositoryURL:  url,
+			RepositoryURL:  source.Spec.URL,
 			RepositoryName: tmpl.Spec.Helm.ChartName,
 			ChartName:      tmpl.Spec.Helm.ChartName,
 			ChartVersion:   tmpl.Spec.Helm.ChartVersion,
-			ReleaseName:    svc.ReleaseName,
+			ReleaseName:    svc.Name,
 			Values:         svc.Values,
 			ReleaseNamespace: func() string {
-				if svc.ReleaseNamespace != "" {
-					return svc.ReleaseNamespace
+				if svc.Namespace != "" {
+					return svc.Namespace
 				}
-				return svc.ReleaseName
+				return svc.Name
 			}(),
-			CreateNamespace: svc.CreateNamespace,
-			PlainHTTP:       svc.RegistryConfig.PlainHTTP,
-			Insecure:        svc.RegistryConfig.Insecure,
+			// The reason it is passed to PlainHTTP instead of InsecureSkipTLSVerify is because
+			// the source.Spec.Insecure field is meant to be used for connecting to repositories
+			// over plain HTTP, which is different than what InsecureSkipTLSVerify is meant for.
+			// See: https://github.com/fluxcd/source-controller/pull/1288
+			PlainHTTP: source.Spec.Insecure,
 		})
 	}
 
-	cp, _, err := sveltos.ReconcileClusterProfile(ctx, r.Client, mc.Namespace, mc.Name,
+	cp, _, err := sveltos.ReconcileProfile(ctx, r.Client, mc.Namespace, mc.Name,
 		map[string]string{
 			hmc.FluxHelmChartNamespaceKey: mc.Namespace,
 			hmc.FluxHelmChartNameKey:      mc.Name,
 		},
-		sveltos.ReconcileClusterProfileOpts{
+		sveltos.ReconcileProfileOpts{
 			OwnerReference: &metav1.OwnerReference{
 				APIVersion: hmc.GroupVersion.String(),
 				Kind:       hmc.ManagedClusterKind,
@@ -390,10 +393,10 @@ func (r *ManagedClusterReconciler) updateServices(ctx context.Context, l logr.Lo
 			HelmChartOpts: opts,
 		})
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to create ClusterProfile: %w", err)
+		return ctrl.Result{}, fmt.Errorf("failed to create Profile: %w", err)
 	}
 
-	l.Info(fmt.Sprintf("Successfully created ClusterProfile (%s)", cp.Name))
+	l.Info(fmt.Sprintf("Successfully created Profile (%s)", cp.Name))
 
 	// We don't technically need to requeue here, but doing so because golint fails with:
 	// `(*ManagedClusterReconciler).updateServices` - result `res` is always `nil` (unparam)
@@ -403,13 +406,13 @@ func (r *ManagedClusterReconciler) updateServices(ctx context.Context, l logr.Lo
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }
 
-// getServiceTemplateRepoURL returns the URL of the Helm Repository used by the ServiceTemplate.
-// It is fetched by querying for ServiceTemplate -> HelmChart -> HelmRepository.Spec.URL.
-func (r *ManagedClusterReconciler) getServiceTemplateRepoURL(ctx context.Context, tmpl *hmc.ServiceTemplate) (string, error) {
+// getServiceTemplateSource returns the source (HelmRepository) used by the ServiceTemplate.
+// It is fetched by querying for ServiceTemplate -> HelmChart -> HelmRepository.
+func (r *ManagedClusterReconciler) getServiceTemplateSource(ctx context.Context, tmpl *hmc.ServiceTemplate) (*sourcev1.HelmRepository, error) {
 	tmplRef := types.NamespacedName{Namespace: tmpl.Namespace, Name: tmpl.Name}
 
 	if tmpl.Status.ChartRef == nil {
-		return "", fmt.Errorf("status for ServiceTemplate (%s) has not been updated yet", tmplRef.String())
+		return nil, fmt.Errorf("status for ServiceTemplate (%s) has not been updated yet", tmplRef.String())
 	}
 
 	chart := &sourcev1.HelmChart{}
@@ -417,7 +420,7 @@ func (r *ManagedClusterReconciler) getServiceTemplateRepoURL(ctx context.Context
 		Namespace: tmpl.Status.ChartRef.Namespace,
 		Name:      tmpl.Spec.Helm.ChartName,
 	}, chart); err != nil {
-		return "", fmt.Errorf("failed to get HelmChart (%s)", tmplRef.String())
+		return nil, fmt.Errorf("failed to get HelmChart (%s)", tmplRef.String())
 	}
 
 	repo := &sourcev1.HelmRepository{}
@@ -427,10 +430,11 @@ func (r *ManagedClusterReconciler) getServiceTemplateRepoURL(ctx context.Context
 		Namespace: chart.Namespace,
 		Name:      chart.Spec.SourceRef.Name,
 	}, repo); err != nil {
-		return "", fmt.Errorf("failed to get HelmRepository (%s)", tmplRef.String())
+		return nil, fmt.Errorf("failed to get HelmRepository (%s)", tmplRef.String())
 	}
 
-	return repo.Spec.URL, nil
+	// return repo.Spec.URL, nil
+	return repo, nil
 }
 
 func (r *ManagedClusterReconciler) validateReleaseWithValues(ctx context.Context, actionConfig *action.Configuration, managedCluster *hmc.ManagedCluster, hcChart *chart.Chart) error {
@@ -522,11 +526,11 @@ func (r *ManagedClusterReconciler) Delete(ctx context.Context, l logr.Logger, ma
 		return ctrl.Result{}, err
 	}
 
-	err = sveltos.DeleteClusterProfile(ctx, r.Client, managedCluster.Namespace, managedCluster.Name)
+	err = sveltos.DeleteProfile(ctx, r.Client, managedCluster.Namespace, managedCluster.Name)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	l.Info(fmt.Sprintf("Issued delete on ClusterProfile (%s)", sveltos.ClusterProfileName(managedCluster.Namespace, managedCluster.Name)))
+	l.Info(fmt.Sprintf("Issued delete on Profile (%s)", managedCluster.Name))
 
 	err = helm.DeleteHelmRelease(ctx, r.Client, managedCluster.Name, managedCluster.Namespace)
 	if err != nil {

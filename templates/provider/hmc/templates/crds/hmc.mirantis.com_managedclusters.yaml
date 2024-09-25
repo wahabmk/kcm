@@ -74,37 +74,18 @@ spec:
                   description: ManagedClusterServiceSpec represents a Service within
                     ManagedCluster
                   properties:
-                    createNamespace:
-                      default: true
-                      description: |-
-                        CreateNamespace create the release namespace if not present.
-                        It will defaults to true if not provided.
+                    disable:
+                      description: Disable can be set to disable handling of this
+                        service.
                       type: boolean
-                    install:
-                      default: true
-                      description: Install tells if this service should be installed.
-                      type: boolean
-                    registryConfig:
-                      description: RegistryConfig to provide options to interact with
-                        registry.
-                      properties:
-                        insecure:
-                          description: Insecure indicates to skip tls certificate
-                            checks for the chart download.
-                          type: boolean
-                        plainHTTP:
-                          description: PlainHTTP indicates to use insecure HTTP connections
-                            for the chart download.
-                          type: boolean
-                      type: object
-                    releaseName:
-                      description: ReleaseName is the chart release.
+                    name:
+                      description: Name is the chart release.
                       minLength: 1
                       type: string
-                    releaseNamespace:
+                    namespace:
                       description: |-
-                        ReleaseNamespace is the namespace the release will be installed in.
-                        It will default to ReleaseName if not provided.
+                        Namespace is the namespace the release will be installed in.
+                        It will default to Name if not provided.
                       type: string
                     template:
                       description: Template is a reference to a Template object located
@@ -113,10 +94,10 @@ spec:
                       type: string
                     values:
                       description: Values is the helm values to be passed to the template.
-                      type: string
+                      x-kubernetes-preserve-unknown-fields: true
                   required:
-                  - install
-                  - releaseName
+                  - disable
+                  - name
                   - template
                   type: object
                 type: array

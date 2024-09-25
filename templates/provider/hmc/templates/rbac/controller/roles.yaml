@@ -138,7 +138,7 @@ rules:
 - apiGroups:
   - config.projectsveltos.io
   resources:
-  - clusterprofiles
+  - profiles
   verbs:
   - create
   - delete

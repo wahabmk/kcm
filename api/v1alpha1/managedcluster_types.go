@@ -68,37 +68,18 @@ type ManagedClusterServiceSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	Template string `json:"template"`
-	// Install tells if this service should be installed.
-	// +kubebuilder:default:=true
-	Install bool `json:"install"`
-	// ReleaseName is the chart release.
+	// Disable can be set to disable handling of this service.
+	Disable bool `json:"disable"`
+	// Name is the chart release.
 	// +kubebuilder:validation:MinLength=1
-	ReleaseName string `json:"releaseName"`
-	// ReleaseNamespace is the namespace the release will be installed in.
-	// It will default to ReleaseName if not provided.
+	Name string `json:"name"`
+	// Namespace is the namespace the release will be installed in.
+	// It will default to Name if not provided.
 	// +optional
-	ReleaseNamespace string `json:"releaseNamespace"`
-	// CreateNamespace create the release namespace if not present.
-	// It will defaults to true if not provided.
-	// +kubebuilder:default:=true
-	// +optional
-	CreateNamespace bool `json:"createNamespace"`
-	// RegistryConfig to provide options to interact with registry.
-	// +optional
-	RegistryConfig *ManagedClusterServiceRegistryConfig `json:"registryConfig,omitempty"`
+	Namespace string `json:"namespace"`
 	// Values is the helm values to be passed to the template.
 	// +optional
-	Values string `json:"values,omitempty"`
-}
-
-// ManagedClusterServiceRegistryConfig provides registry config per Service.
-type ManagedClusterServiceRegistryConfig struct {
-	// PlainHTTP indicates to use insecure HTTP connections for the chart download.
-	// +optional
-	PlainHTTP bool `json:"plainHTTP"`
-	// Insecure indicates to skip tls certificate checks for the chart download.
-	// +optional
-	Insecure bool `json:"insecure"`
+	Values *apiextensionsv1.JSON `json:"values,omitempty"`
 }
 
 // ManagedClusterSpec defines the desired state of ManagedCluster
