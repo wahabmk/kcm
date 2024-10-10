@@ -27,6 +27,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -343,4 +344,33 @@ func (r *ProviderTemplateReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&hmc.ProviderTemplate{}).
 		Complete(r)
+}
+
+// templateSource returns the source of the provided template.
+func templateSource(ctx context.Context, c client.Client, tmpl Template) (*sourcev1.HelmRepository, error) {
+	ref := types.NamespacedName{Namespace: tmpl.GetNamespace(), Name: tmpl.GetName()}
+
+	if tmpl.GetStatus() == nil || tmpl.GetStatus().ChartRef == nil {
+		return nil, fmt.Errorf("status for Template (%s) has not been updated yet", ref.String())
+	}
+
+	hc := &sourcev1.HelmChart{}
+	if err := c.Get(ctx, types.NamespacedName{
+		Namespace: tmpl.GetStatus().ChartRef.Namespace,
+		Name:      tmpl.GetStatus().ChartRef.Name,
+	}, hc); err != nil {
+		return nil, fmt.Errorf("failed to get HelmChart (%s): %w", ref.String(), err)
+	}
+
+	repo := &sourcev1.HelmRepository{}
+	if err := c.Get(ctx, types.NamespacedName{
+		// Using chart's namespace because it's source
+		// (helm repository in this case) should be within the same namespace.
+		Namespace: hc.Namespace,
+		Name:      hc.Spec.SourceRef.Name,
+	}, repo); err != nil {
+		return nil, fmt.Errorf("failed to get HelmRepository (%s): %w", ref.String(), err)
+	}
+
+	return repo, nil
 }

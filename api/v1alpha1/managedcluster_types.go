@@ -91,6 +91,9 @@ type ManagedClusterSpec struct {
 	Priority int32 `json:"priority,omitempty"`
 	// DryRun specifies whether the template should be applied after validation or only validated.
 	DryRun bool `json:"dryRun,omitempty"`
+
+	// +kubebuilder:default:=false
+
 	// StopOnConflict specifies what to do in case of a conflict.
 	// E.g. If another object is already managing a service.
 	// By default the remaining services will be deployed even if conflict is detected.

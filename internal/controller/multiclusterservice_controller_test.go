@@ -16,62 +16,122 @@ package controller
 
 import (
 	"context"
+	"time"
 
+	hcv2 "github.com/fluxcd/helm-controller/api/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	hmcmirantiscomv1alpha1 "github.com/Mirantis/hmc/api/v1alpha1"
+	hmc "github.com/Mirantis/hmc/api/v1alpha1"
+	"github.com/Mirantis/hmc/internal/utils"
 )
 
 var _ = Describe("MultiClusterService Controller", func() {
 	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+		const (
+			multiClusterServiceName = "test-multiclusterservice"
+			serviceTemplateName     = "test-service-0-1-0"
+			serviceReleaseName      = "test-service"
+		)
 
 		ctx := context.Background()
 
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+		multiClusterServiceRef := types.NamespacedName{
+			Name: multiClusterServiceName,
 		}
-		multiclusterservice := &hmcmirantiscomv1alpha1.MultiClusterService{}
+		serviceTemplateRef := types.NamespacedName{
+			Namespace: utils.DefaultSystemNamespace,
+			Name:      serviceTemplateName,
+		}
+
+		multiClusterService := &hmc.MultiClusterService{}
+		namespace := &corev1.Namespace{}
+		serviceTemplate := &hmc.ServiceTemplate{}
 
 		BeforeEach(func() {
-			By("creating the custom resource for the Kind MultiClusterService")
-			err := k8sClient.Get(ctx, typeNamespacedName, multiclusterservice)
+			By("creating hmc-system namespace")
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: utils.DefaultSystemNamespace}, namespace)
 			if err != nil && errors.IsNotFound(err) {
-				resource := &hmcmirantiscomv1alpha1.MultiClusterService{
+				namespace = &corev1.Namespace{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
+						Name: utils.DefaultSystemNamespace,
 					},
-					// TODO(user): Specify other spec details if needed.
 				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+				Expect(k8sClient.Create(ctx, namespace)).To(Succeed())
+			}
+
+			By("creating the custom resource for the Kind Template")
+			err = k8sClient.Get(ctx, serviceTemplateRef, serviceTemplate)
+			if err != nil && errors.IsNotFound(err) {
+				serviceTemplate = &hmc.ServiceTemplate{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      serviceTemplateName,
+						Namespace: utils.DefaultSystemNamespace,
+					},
+					Spec: hmc.ServiceTemplateSpec{
+						TemplateSpecCommon: hmc.TemplateSpecCommon{
+							Helm: hmc.HelmSpec{
+								ChartRef: &hcv2.CrossNamespaceSourceReference{
+									Kind:      "HelmChart",
+									Name:      "ref-test",
+									Namespace: utils.DefaultSystemNamespace,
+								},
+							},
+						},
+					},
+				}
+			}
+			Expect(k8sClient.Create(ctx, serviceTemplate)).To(Succeed())
+
+			By("creating the custom resource for the Kind MultiClusterService")
+			err = k8sClient.Get(ctx, multiClusterServiceRef, multiClusterService)
+			if err != nil && errors.IsNotFound(err) {
+				multiClusterService = &hmc.MultiClusterService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: multiClusterServiceName,
+					},
+					Spec: hmc.MultiClusterServiceSpec{
+						Services: []hmc.ServiceSpec{
+							{
+								Template: serviceTemplateName,
+								Name:     serviceReleaseName,
+							},
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, multiClusterService)).To(Succeed())
 			}
 		})
 
 		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &hmcmirantiscomv1alpha1.MultiClusterService{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
+			By("Cleanup")
 
-			By("Cleanup the specific resource instance MultiClusterService")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &MultiClusterServiceReconciler{
+			reconciler := &MultiClusterServiceReconciler{
 				Client: k8sClient,
 			}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
+			Expect(k8sClient.Delete(ctx, multiClusterService)).To(Succeed())
+			// Running reconcile to remove the finalizer and delete the MultiClusterService
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: multiClusterServiceRef})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(k8sClient.Get(ctx, multiClusterServiceRef, multiClusterService), 1*time.Minute, 5*time.Second).Should(HaveOccurred())
+			Expect(k8sClient.Delete(ctx, serviceTemplate)).To(Succeed())
+		})
+		It("should successfully reconcile the resource", func() {
+			By("Reconciling the created resource")
+			reconciler := &MultiClusterServiceReconciler{
+				Client: k8sClient,
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: multiClusterServiceRef,
 			})
 			Expect(err).NotTo(HaveOccurred())
 			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.

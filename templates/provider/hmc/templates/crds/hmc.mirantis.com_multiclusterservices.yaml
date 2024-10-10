@@ -132,6 +132,7 @@ spec:
                   type: object
                 type: array
               stopOnConflict:
+                default: false
                 description: |-
                   StopOnConflict specifies what to do in case of a conflict.
                   E.g. If another object is already managing a service.
