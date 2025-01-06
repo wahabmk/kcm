@@ -19,7 +19,7 @@ rules:
   - cluster.x-k8s.io
   resources:
   - clusters
-  verbs: {{ include "rbac.viewerVerbs" . | nindent 4 }}
+  verbs: {{ include "rbac.editorVerbs" . | nindent 4 }}
 - apiGroups:
   - cluster.x-k8s.io
   resources:

@@ -37,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -298,10 +299,10 @@ func (r *ClusterDeploymentReconciler) updateCluster(ctx context.Context, mc *hmc
 	if err := mc.AddHelmValues(func(values map[string]any) error {
 		values["clusterIdentity"] = cred.Spec.IdentityRef
 
-		if _, ok := values["clusterLabels"]; !ok {
-			// Use the ManagedCluster's own labels if not defined.
-			values["clusterLabels"] = mc.GetObjectMeta().GetLabels()
-		}
+		// if _, ok := values["clusterLabels"]; !ok {
+		// 	// Use the ManagedCluster's own labels if not defined.
+		// 	values["clusterLabels"] = mc.GetObjectMeta().GetLabels()
+		// }
 
 		return nil
 	}); err != nil {
@@ -355,6 +356,34 @@ func (r *ClusterDeploymentReconciler) updateCluster(ctx context.Context, mc *hmc
 	if requeue {
 		return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 	}
+
+	// WAHAB:
+	// This is where we can patch cluster to apply labels.
+	// Well, if I write the code such that it first looks for the Cluster object
+	// then maybe I don't need to wait for the helm release to be ready?
+
+	// ------------------------------------------------------------------------------------------------------------------------------------
+	cluster := &clusterv1.Cluster{}
+	if err := r.Client.Get(ctx, client.ObjectKeyFromObject(mc), cluster); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	labels := cluster.GetLabels()
+	for k, v := range mc.GetLabels() {
+		labels[k] = v
+	}
+	cluster.SetLabels(labels)
+
+	if err := r.Client.Update(ctx, cluster); err != nil {
+		apimeta.SetStatusCondition(mc.GetConditions(), metav1.Condition{
+			Type:    hmc.CredentialReadyCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  hmc.FailedReason,
+			Message: fmt.Sprintf("Failed to set Labels to associated Cluster object: %s", err),
+		})
+		return ctrl.Result{}, fmt.Errorf("failed to set labels to Cluster associated with ClusterDeployment: %w", err)
+	}
+	// ------------------------------------------------------------------------------------------------------------------------------------
 
 	if !fluxconditions.IsReady(hr) {
 		return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
