@@ -79,6 +79,8 @@ spec:
                 description: ServiceSpec is spec related to deployment of services.
                 properties:
                   driftExclusions:
+                    description: DriftExclusions specifies specific configurations
+                      of resources to ignore for drift detection.
                     items:
                       properties:
                         paths:
@@ -133,7 +135,9 @@ spec:
                       - paths
                       type: object
                     type: array
-                  ignoreDrift:
+                  driftIgnore:
+                    description: DriftIgnore specifies resources to ignore for drift
+                      detection.
                     items:
                       properties:
                         annotationSelector:
@@ -271,6 +275,8 @@ spec:
                     type: boolean
                   syncMode:
                     default: Continuous
+                    description: SyncMode specifies how services are synced in the
+                      target cluster.
                     enum:
                     - OneTime
                     - Continuous

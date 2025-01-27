@@ -32,7 +32,7 @@ import (
 	"github.com/K0rdent/kcm/internal/utils"
 )
 
-const DrifIgnorePatch = `- op: add
+const driftIgnorePatch = `- op: add
   path: /metadata/annotations/projectsveltos.io~1driftDetectionIgnore
   value: ok`
 
@@ -43,7 +43,7 @@ type ReconcileProfileOpts struct {
 	HelmChartOpts        []HelmChartOpts
 	TemplateResourceRefs []sveltosv1beta1.TemplateResourceRef
 	PolicyRefs           []sveltosv1beta1.PolicyRef
-	IgnoreDrift          []libsveltosv1beta1.PatchSelector
+	DriftIgnore          []libsveltosv1beta1.PatchSelector
 	DriftExclusions      []sveltosv1beta1.DriftExclusion
 	Priority             int32
 	StopOnConflict       bool
@@ -252,10 +252,10 @@ func GetSpec(opts *ReconcileProfileOpts) (*sveltosv1beta1.Spec, error) {
 		DriftExclusions:      opts.DriftExclusions,
 	}
 
-	for _, target := range opts.IgnoreDrift {
+	for _, target := range opts.DriftIgnore {
 		spec.Patches = append(spec.Patches, libsveltosv1beta1.Patch{
 			Target: &target,
-			Patch:  DrifIgnorePatch,
+			Patch:  driftIgnorePatch,
 		})
 	}
 

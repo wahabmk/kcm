@@ -1322,8 +1322,8 @@ func (in *ServiceSpec) DeepCopyInto(out *ServiceSpec) {
 		*out = make([]v1beta1.TemplateResourceRef, len(*in))
 		copy(*out, *in)
 	}
-	if in.IgnoreDrift != nil {
-		in, out := &in.IgnoreDrift, &out.IgnoreDrift
+	if in.DriftIgnore != nil {
+		in, out := &in.DriftIgnore, &out.DriftIgnore
 		*out = make([]apiv1beta1.PatchSelector, len(*in))
 		copy(*out, *in)
 	}

@@ -97,9 +97,12 @@ type ServiceSpec struct {
 	// +kubebuilder:default:=Continuous
 	// +kubebuilder:validation:Enum:=OneTime;Continuous;ContinuousWithDriftDetection;DryRun
 
-	SyncMode        string                            `json:"syncMode,omitempty"`
-	IgnoreDrift     []libsveltosv1beta1.PatchSelector `json:"ignoreDrift,omitempty"`
-	DriftExclusions []sveltosv1beta1.DriftExclusion   `json:"driftExclusions,omitempty"`
+	// SyncMode specifies how services are synced in the target cluster.
+	SyncMode string `json:"syncMode,omitempty"`
+	// DriftIgnore specifies resources to ignore for drift detection.
+	DriftIgnore []libsveltosv1beta1.PatchSelector `json:"driftIgnore,omitempty"`
+	// DriftExclusions specifies specific configurations of resources to ignore for drift detection.
+	DriftExclusions []sveltosv1beta1.DriftExclusion `json:"driftExclusions,omitempty"`
 }
 
 // MultiClusterServiceSpec defines the desired state of MultiClusterService
