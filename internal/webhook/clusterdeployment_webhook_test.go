@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	. "github.com/onsi/gomega"
+	sveltosv1beta1 "github.com/projectsveltos/addon-controller/api/v1beta1"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -170,6 +171,77 @@ func TestClusterDeploymentValidateCreate(t *testing.T) {
 				),
 			},
 			err: "the ClusterDeployment is invalid: the template is not valid: validation error example",
+		},
+		{
+			name: "should fail if TemplateResourceRefs are referring to resource in another namespace",
+			ClusterDeployment: clusterdeployment.NewClusterDeployment(
+				clusterdeployment.WithClusterTemplate(testTemplateName),
+				clusterdeployment.WithCredential(testCredentialName),
+				clusterdeployment.WithServiceTemplate(testSvcTemplate1Name),
+				clusterdeployment.WithServiceSpec(v1alpha1.ServiceSpec{
+					Services: []v1alpha1.Service{
+						{Template: testSvcTemplate1Name},
+					},
+					TemplateResourceRefs: []sveltosv1beta1.TemplateResourceRef{
+						{Resource: corev1.ObjectReference{APIVersion: "v1", Kind: "ConfigMap", Name: "test-configmap", Namespace: "othernamespace"}},
+						{Resource: corev1.ObjectReference{APIVersion: "v1", Kind: "Secret", Name: "test-secret", Namespace: "othernamespace"}},
+					},
+				}),
+			),
+			existingObjects: []runtime.Object{
+				mgmt,
+				cred,
+				template.NewClusterTemplate(
+					template.WithName(testTemplateName),
+					template.WithProvidersStatus(
+						"infrastructure-aws",
+						"control-plane-k0smotron",
+						"bootstrap-k0smotron",
+					),
+					template.WithValidationStatus(v1alpha1.TemplateValidationStatus{Valid: true}),
+				),
+				template.NewServiceTemplate(
+					template.WithName(testSvcTemplate1Name),
+					template.WithValidationStatus(v1alpha1.TemplateValidationStatus{Valid: true}),
+				),
+			},
+			err: "the ClusterDeployment is invalid: ConfigMap \"test-configmap\" is in namespace othernamespace, cannot refer to a resource in a namespace other than default in .spec.serviceSpec.templateResourceRefs\nSecret \"test-secret\" is in namespace othernamespace, cannot refer to a resource in a namespace other than default in .spec.serviceSpec.templateResourceRefs",
+		},
+		{
+			name: "should fail if ValuesFrom are referring to resource in another namespace",
+			ClusterDeployment: clusterdeployment.NewClusterDeployment(
+				clusterdeployment.WithClusterTemplate(testTemplateName),
+				clusterdeployment.WithCredential(testCredentialName),
+				clusterdeployment.WithServiceSpec(v1alpha1.ServiceSpec{
+					Services: []v1alpha1.Service{
+						{
+							Template: testSvcTemplate1Name,
+							ValuesFrom: []sveltosv1beta1.ValueFrom{
+								{Kind: "ConfigMap", Name: "test-configmap", Namespace: "othernamespace"},
+								{Kind: "Secret", Name: "test-secret", Namespace: "othernamespace"},
+							},
+						},
+					},
+				}),
+			),
+			existingObjects: []runtime.Object{
+				mgmt,
+				cred,
+				template.NewClusterTemplate(
+					template.WithName(testTemplateName),
+					template.WithProvidersStatus(
+						"infrastructure-aws",
+						"control-plane-k0smotron",
+						"bootstrap-k0smotron",
+					),
+					template.WithValidationStatus(v1alpha1.TemplateValidationStatus{Valid: true}),
+				),
+				template.NewServiceTemplate(
+					template.WithName(testSvcTemplate1Name),
+					template.WithValidationStatus(v1alpha1.TemplateValidationStatus{Valid: true}),
+				),
+			},
+			err: "the ClusterDeployment is invalid: ConfigMap \"test-configmap\" is in namespace othernamespace, cannot refer to a resource in a namespace other than default in .spec.serviceSpec.services[].valuesFrom\nSecret \"test-secret\" is in namespace othernamespace, cannot refer to a resource in a namespace other than default in .spec.serviceSpec.services[].valuesFrom",
 		},
 		{
 			name: "should succeed",
