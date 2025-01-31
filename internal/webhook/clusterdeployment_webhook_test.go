@@ -248,7 +248,23 @@ func TestClusterDeploymentValidateCreate(t *testing.T) {
 			ClusterDeployment: clusterdeployment.NewClusterDeployment(
 				clusterdeployment.WithClusterTemplate(testTemplateName),
 				clusterdeployment.WithCredential(testCredentialName),
-				clusterdeployment.WithServiceTemplate(testSvcTemplate1Name),
+				clusterdeployment.WithServiceSpec(v1alpha1.ServiceSpec{
+					TemplateResourceRefs: []sveltosv1beta1.TemplateResourceRef{
+						// Should not fail if namespace is empty
+						{Resource: corev1.ObjectReference{APIVersion: "v1", Kind: "ConfigMap", Name: "test-configmap"}},
+						{Resource: corev1.ObjectReference{APIVersion: "v1", Kind: "Secret", Name: "test-secret"}},
+					},
+					Services: []v1alpha1.Service{
+						{
+							Template: testSvcTemplate1Name,
+							ValuesFrom: []sveltosv1beta1.ValueFrom{
+								// Should not fail if namespace is empty
+								{Kind: "ConfigMap", Name: "test-configmap"},
+								{Kind: "Secret", Name: "test-secret"},
+							},
+						},
+					},
+				}),
 			),
 			existingObjects: []runtime.Object{
 				mgmt,
