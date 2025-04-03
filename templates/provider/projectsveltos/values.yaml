@@ -1,0 +1,46 @@
+projectsveltos:
+  # accessManager:
+  #   manager:
+  #     image:
+  #       # repository: docker.io/projectsveltos/access-manager
+  #       # tag: v0.45.0
+  addonController:
+    controller:
+      image:
+        repository: msr.ci.mirantis.com/projectsveltos/addon-controller
+        tag: 6e25e99
+  # classifierManager:
+  #   manager:
+  #     image:
+  #       # repository: docker.io/projectsveltos/classifier
+  #       # tag: v0.45.0
+  # conversionWebhook:
+  #   sveltosWebhook:
+  #     image:
+  #       # repository: docker.io/projectsveltos/webhook-conversion
+  #       # tag: v0.45.0
+  # eventManager:
+  #   manager:
+  #     image:
+  #       # repository: docker.io/projectsveltos/event-manager
+  #       # tag: v0.45.0
+  # hcManager:
+  #   manager:
+  #     image:
+  #       # repository: docker.io/projectsveltos/healthcheck-manager
+  #       # tag: v0.45.0
+  # registerMgmtClusterJob:
+  #   registerMgmtCluster:
+  #     image:
+  #       # repository: docker.io/projectsveltos/register-mgmt-cluster
+  #       # tag: v0.45.0
+  # scManager:
+  #   manager:
+  #     image:
+  #       # repository: docker.io/projectsveltos/sveltoscluster-manager
+  #       # tag: v0.45.0
+  # shardController:
+  #   manager:
+  #     image:
+  #       # repository: docker.io/projectsveltos/shard-controller
+  #       # tag: v0.45.0

@@ -607,22 +607,13 @@ type component struct {
 	isCAPIProvider bool
 }
 
-func applyKCMDefaults(config *apiextensionsv1.JSON) (*apiextensionsv1.JSON, error) {
+func applyDefaults(config *apiextensionsv1.JSON, enforcedValues map[string]any) (*apiextensionsv1.JSON, error) {
 	values := chartutil.Values{}
 	if config != nil && config.Raw != nil {
 		err := json.Unmarshal(config.Raw, &values)
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	// Those are only needed for the initial installation
-	enforcedValues := map[string]any{
-		"controller": map[string]any{
-			"createManagement":       false,
-			"createAccessManagement": false,
-			"createRelease":          false,
-		},
 	}
 
 	chartutil.CoalesceTables(values, enforcedValues)
@@ -632,6 +623,86 @@ func applyKCMDefaults(config *apiextensionsv1.JSON) (*apiextensionsv1.JSON, erro
 	}
 	return &apiextensionsv1.JSON{Raw: raw}, nil
 }
+
+func applySveltosDefaults(config *apiextensionsv1.JSON) (*apiextensionsv1.JSON, error) {
+	return applyDefaults(config, map[string]any{
+		"projectsveltos": map[string]any{
+			"registerMgmtClusterJob": map[string]any{
+				"registerMgmtCluster": map[string]any{
+					"args": []string{
+						"--labels=labelA=A,labelB=B,labelC=C",
+					},
+				},
+			},
+		},
+	})
+}
+
+func applyKCMDefaults(config *apiextensionsv1.JSON) (*apiextensionsv1.JSON, error) {
+	// These are only needed for the initial installation.
+	return applyDefaults(config, map[string]any{
+		"controller": map[string]any{
+			"createManagement":       false,
+			"createAccessManagement": false,
+			"createRelease":          false,
+		},
+	})
+}
+
+// func applySveltosDefaults(config *apiextensionsv1.JSON) (*apiextensionsv1.JSON, error) {
+// 	values := chartutil.Values{}
+// 	if config != nil && config.Raw != nil {
+// 		err := json.Unmarshal(config.Raw, &values)
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 	}
+
+// 	enforcedValues := map[string]any{
+// 		"projectsveltos": map[string]any{
+// 			"registerMgmtClusterJob": map[string]any{
+// 				"registerMgmtCluster": map[string]any{
+// 					"args": []string{
+// 						"--labels=labelA=A,labelB=B,labelC=C",
+// 					},
+// 				},
+// 			},
+// 		},
+// 	}
+
+// 	chartutil.CoalesceTables(values, enforcedValues)
+// 	raw, err := json.Marshal(values)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return &apiextensionsv1.JSON{Raw: raw}, nil
+// }
+
+// func applyKCMDefaults(config *apiextensionsv1.JSON) (*apiextensionsv1.JSON, error) {
+// 	values := chartutil.Values{}
+// 	if config != nil && config.Raw != nil {
+// 		err := json.Unmarshal(config.Raw, &values)
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 	}
+
+// 	// Those are only needed for the initial installation
+// 	enforcedValues := map[string]any{
+// 		"controller": map[string]any{
+// 			"createManagement":       false,
+// 			"createAccessManagement": false,
+// 			"createRelease":          false,
+// 		},
+// 	}
+
+// 	chartutil.CoalesceTables(values, enforcedValues)
+// 	raw, err := json.Marshal(values)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return &apiextensionsv1.JSON{Raw: raw}, nil
+// }
 
 func getWrappedComponents(mgmt *kcm.Management, release *kcm.Release) ([]component, error) {
 	components := make([]component, 0, len(mgmt.Spec.Providers)+2)
@@ -684,6 +755,11 @@ func getWrappedComponents(mgmt *kcm.Management, release *kcm.Release) ([]compone
 		}
 
 		if p.Name == kcm.ProviderSveltosName {
+			config, err := applySveltosDefaults(c.Config)
+			if err != nil {
+				return nil, err
+			}
+			c.Config = config
 			c.isCAPIProvider = false
 			c.targetNamespace = sveltosTargetNamespace
 			c.installSettings = &fluxv2.Install{
