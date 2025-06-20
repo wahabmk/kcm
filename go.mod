@@ -7,12 +7,12 @@ require (
 	github.com/a8m/envsubst v1.4.3
 	github.com/cert-manager/cert-manager v1.18.0
 	github.com/fluxcd/helm-controller/api v1.3.0
-	github.com/fluxcd/pkg/apis/meta v1.12.0
+	github.com/fluxcd/pkg/apis/meta v1.13.0
 	github.com/fluxcd/pkg/runtime v0.60.0
-	github.com/fluxcd/source-controller/api v1.6.0
-	github.com/google/cel-go v0.23.2
+	github.com/fluxcd/source-controller/api v1.6.1
+	github.com/google/cel-go v0.25.0
 	github.com/google/uuid v1.6.0
-	github.com/hashicorp/go-retryablehttp v0.7.7
+	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/onsi/ginkgo/v2 v2.23.4
 	github.com/onsi/gomega v1.37.0
 	github.com/opencontainers/go-digest v1.0.1-0.20231025023718-d50d2fec9c98
@@ -29,15 +29,15 @@ require (
 	golang.org/x/time v0.12.0
 	gopkg.in/yaml.v3 v3.0.1
 	helm.sh/helm/v3 v3.18.2
-	k8s.io/api v0.33.1
+	k8s.io/api v0.33.2
 	k8s.io/apiextensions-apiserver v0.33.1
-	k8s.io/apimachinery v0.33.1
-	k8s.io/client-go v0.33.1
-	k8s.io/kubectl v0.33.1
+	k8s.io/apimachinery v0.33.2
+	k8s.io/client-go v0.33.2
+	k8s.io/kubectl v0.33.2
 	k8s.io/utils v0.0.0-20250502105355-0f33e8f1c979
 	kubevirt.io/api v1.5.2
 	kubevirt.io/containerized-data-importer-api v1.62.0
-	sigs.k8s.io/cluster-api v1.10.2
+	sigs.k8s.io/cluster-api v1.10.3
 	sigs.k8s.io/cluster-api-ipam-provider-in-cluster v1.0.2
 	sigs.k8s.io/cluster-api-operator v0.20.0
 	sigs.k8s.io/controller-runtime v0.21.0
@@ -45,7 +45,7 @@ require (
 )
 
 require (
-	cel.dev/expr v0.19.1 // indirect
+	cel.dev/expr v0.23.1 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Azure/go-ntlmssp v0.0.0-20221128193559-754e69321358 // indirect
@@ -184,9 +184,9 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gotest.tools/v3 v3.4.0 // indirect
 	k8s.io/apiserver v0.33.1 // indirect
-	k8s.io/cli-runtime v0.33.1 // indirect
+	k8s.io/cli-runtime v0.33.2 // indirect
 	k8s.io/cluster-bootstrap v0.32.3 // indirect
-	k8s.io/component-base v0.33.1 // indirect
+	k8s.io/component-base v0.33.2 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff // indirect
 	kubevirt.io/controller-lifecycle-operator-sdk/api v0.0.0-20220329064328-f3cc58c6ed90 // indirect

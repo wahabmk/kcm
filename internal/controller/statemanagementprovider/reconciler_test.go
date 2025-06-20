@@ -37,7 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	clientfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	kcmv1beta1 "github.com/K0rdent/kcm/api/v1beta1"
+	kcmv1 "github.com/K0rdent/kcm/api/v1beta1"
 )
 
 const (
@@ -55,6 +55,17 @@ func TestReconciler_evaluateReadiness(t *testing.T) {
 		rule           string
 		expectedResult bool
 		expectError    bool
+	}
+
+	f := func(t *testing.T, tc testCase) {
+		t.Helper()
+		res, err := evaluateReadiness(tc.object, tc.rule)
+		if tc.expectError {
+			require.Error(t, err)
+			return
+		}
+		require.NoError(t, err)
+		require.Equal(t, tc.expectedResult, res)
 	}
 
 	cases := map[string]testCase{
@@ -109,17 +120,6 @@ self.status.availableReplicas == self.status.readyReplicas`,
 		},
 	}
 
-	f := func(t *testing.T, tc testCase) {
-		t.Helper()
-		res, err := evaluateReadiness(tc.object, tc.rule)
-		if tc.expectError {
-			require.Error(t, err)
-			return
-		}
-		require.NoError(t, err)
-		require.Equal(t, tc.expectedResult, res)
-	}
-
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -139,7 +139,7 @@ func TestReconciler_buildRBACRules(t *testing.T) {
 	f := func(t *testing.T, tc testCase) {
 		t.Helper()
 		rules := buildRBACRules(tc.gvrList)
-		require.ElementsMatch(t, tc.expectedRules, rules)
+		require.Equal(t, tc.expectedRules, rules)
 	}
 
 	cases := map[string]testCase{
@@ -183,7 +183,7 @@ func TestReconciler_ensureRBAC(t *testing.T) {
 	t.Parallel()
 
 	type testCase struct {
-		stateManagementProvider    *kcmv1beta1.StateManagementProvider
+		stateManagementProvider    *kcmv1.StateManagementProvider
 		discoveryResources         []*metav1.APIResourceList
 		existingRBACObjects        []client.Object
 		expectedServiceAccount     *corev1.ServiceAccount
@@ -237,13 +237,13 @@ func TestReconciler_ensureRBAC(t *testing.T) {
 
 	cases := map[string]testCase{
 		"create-rbac-objects": {
-			stateManagementProvider: &kcmv1beta1.StateManagementProvider{
+			stateManagementProvider: &kcmv1.StateManagementProvider{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      stateManagementProviderName,
 					Namespace: systemNamespace,
 				},
-				Spec: kcmv1beta1.StateManagementProviderSpec{
-					Adapter: kcmv1beta1.ResourceReference{
+				Spec: kcmv1.StateManagementProviderSpec{
+					Adapter: kcmv1.ResourceReference{
 						APIVersion: "apps/v1",
 						Kind:       "Deployment",
 						Name:       "test",
@@ -305,13 +305,13 @@ func TestReconciler_ensureRBAC(t *testing.T) {
 			},
 		},
 		"update-service-account": {
-			stateManagementProvider: &kcmv1beta1.StateManagementProvider{
+			stateManagementProvider: &kcmv1.StateManagementProvider{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      stateManagementProviderName,
 					Namespace: systemNamespace,
 				},
-				Spec: kcmv1beta1.StateManagementProviderSpec{
-					Adapter: kcmv1beta1.ResourceReference{
+				Spec: kcmv1.StateManagementProviderSpec{
+					Adapter: kcmv1.ResourceReference{
 						APIVersion: "apps/v1",
 						Kind:       "Deployment",
 						Name:       "test",
@@ -382,13 +382,13 @@ func TestReconciler_ensureRBAC(t *testing.T) {
 			},
 		},
 		"update-cluster-role": {
-			stateManagementProvider: &kcmv1beta1.StateManagementProvider{
+			stateManagementProvider: &kcmv1.StateManagementProvider{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      stateManagementProviderName,
 					Namespace: systemNamespace,
 				},
-				Spec: kcmv1beta1.StateManagementProviderSpec{
-					Adapter: kcmv1beta1.ResourceReference{
+				Spec: kcmv1.StateManagementProviderSpec{
+					Adapter: kcmv1.ResourceReference{
 						APIVersion: "apps/v1",
 						Kind:       "Deployment",
 						Name:       "test",
@@ -469,13 +469,13 @@ func TestReconciler_ensureRBAC(t *testing.T) {
 			},
 		},
 		"update-cluster-role-binding": {
-			stateManagementProvider: &kcmv1beta1.StateManagementProvider{
+			stateManagementProvider: &kcmv1.StateManagementProvider{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      stateManagementProviderName,
 					Namespace: systemNamespace,
 				},
-				Spec: kcmv1beta1.StateManagementProviderSpec{
-					Adapter: kcmv1beta1.ResourceReference{
+				Spec: kcmv1.StateManagementProviderSpec{
+					Adapter: kcmv1.ResourceReference{
 						APIVersion: "apps/v1",
 						Kind:       "Deployment",
 						Name:       "test",
@@ -565,7 +565,7 @@ func TestReconciler_ensureRBAC(t *testing.T) {
 	}
 }
 
-func fakeKubeClient(t *testing.T, smp *kcmv1beta1.StateManagementProvider, objects ...client.Object) client.Client {
+func fakeKubeClient(t *testing.T, smp *kcmv1.StateManagementProvider, objects ...client.Object) client.Client {
 	t.Helper()
 	builder := clientfake.NewClientBuilder().WithScheme(scheme(t)).WithObjects(smp)
 	for _, obj := range objects {
@@ -589,7 +589,7 @@ func scheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(s))
-	utilruntime.Must(kcmv1beta1.AddToScheme(s))
+	utilruntime.Must(kcmv1.AddToScheme(s))
 	return s
 }
 
