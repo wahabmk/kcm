@@ -7,7 +7,7 @@ IMG ?= localhost/kcm/controller:latest
 IMG_REPO = $(shell echo $(IMG) | cut -d: -f1)
 IMG_TAG = $(shell echo $(IMG) | cut -d: -f2)
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.32.0
+ENVTEST_K8S_VERSION = 1.33.0
 
 KCM_STABLE_VERSION = $(shell git ls-remote --tags --sort v:refname --exit-code --refs https://github.com/k0rdent/kcm | grep -v -e "-rc[0-9]\+$$" | tail -n1 | cut -d '/' -f3)
 
@@ -67,7 +67,7 @@ manifests: controller-gen ## Generate CustomResourceDefinition objects.
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt",year="$(shell date +%Y)" paths="./..."
 
 .PHONY: set-kcm-version
 set-kcm-version: yq
@@ -95,9 +95,22 @@ kcm-dist-release: helm yq
 	$(YQ) eval -i '.metadata.annotations."meta.helm.sh/release-namespace" = "kcm-system"' dist/install.yaml
 	$(YQ) eval -i '.metadata.labels."app.kubernetes.io/managed-by" = "Helm"' dist/install.yaml
 
+# TODO: combine all of the bash/sh files into a single one
 .PHONY: templates-generate
 templates-generate:
 	@hack/templates.sh
+
+.PHONY: bump-chart-version
+bump-chart-version: yq
+	@YQ=$(YQ) $(SHELL) hack/chart-version.bash
+
+.PHONY: update-release
+update-release: yq
+	@YQ=$(YQ) $(SHELL) hack/update-release.bash
+
+.PHONY: update-dev-confs
+update-dev-confs: yq
+	@YQ=$(YQ) $(SHELL) hack/update-dev-configs.bash
 
 .PHONY: capo-orc-fetch
 capo-orc-fetch: CAPO_DIR := $(PROVIDER_TEMPLATES_DIR)/cluster-api-provider-openstack
@@ -108,7 +121,7 @@ capo-orc-fetch:
 	sed -E 's|(image: )([^\s/]+)(/.*)|\1{{ default "\2" (and .Values.global .Values.global.registry) }}\3|' > $(CAPO_ORC_TEMPLATE); \
 
 .PHONY: generate-all
-generate-all: generate manifests templates-generate add-license capo-orc-fetch
+generate-all: generate manifests bump-chart-version templates-generate update-release add-license capo-orc-fetch update-dev-confs
 
 .PHONY: fmt
 fmt: ## Run 'go fmt' against code.
@@ -436,7 +449,7 @@ test-apply: kind-deploy
 dev-destroy: kind-undeploy registry-undeploy ## Destroy the development environment by deleting the kind cluster and local registry.
 
 .PHONY: support-bundle
-support-bundle: SUPPORT_BUNDLE_OUTPUT=$(CURDIR)/support-bundle-$(shell date +"%Y-%m-%dT%H_%M_%S")
+support-bundle: SUPPORT_BUNDLE_OUTPUT=$(CURDIR)/support-bundle-$(shell date +"%Y-%m-%dT%H_%M_%S_%N")
 support-bundle: envsubst support-bundle-cli
 	@NAMESPACE=$(NAMESPACE) $(ENVSUBST) -no-unset -i config/support-bundle.yaml | $(SUPPORT_BUNDLE_CLI) -o $(SUPPORT_BUNDLE_OUTPUT) --debug -
 
@@ -530,7 +543,7 @@ VELERO_VERSION ?= $(shell go mod edit -json | jq -r '.Require[] | select(.Path =
 VELERO_BACKUP_NAME ?= velero.io_backups
 VELERO_BACKUP_CRD ?= $(EXTERNAL_CRD_DIR)/$(VELERO_BACKUP_NAME)-$(VELERO_VERSION).yaml
 
-SVELTOS_VERSION ?= v$(shell grep 'appVersion:' $(PROVIDER_TEMPLATES_DIR)/projectsveltos/Chart.yaml | cut -d ' ' -f 2)
+SVELTOS_VERSION ?= $(shell grep 'appVersion:' $(PROVIDER_TEMPLATES_DIR)/projectsveltos/Chart.yaml | cut -d '"' -f 2)
 SVELTOS_NAME ?= sveltos
 SVELTOS_CRD ?= $(EXTERNAL_CRD_DIR)/$(SVELTOS_NAME)-$(SVELTOS_VERSION).yaml
 
@@ -615,7 +628,7 @@ SUPPORT_BUNDLE_CLI ?= $(LOCALBIN)/support-bundle-$(SUPPORT_BUNDLE_CLI_VERSION)
 ## Tool Versions
 CONTROLLER_TOOLS_VERSION ?= v0.17.2
 ENVTEST_VERSION ?= release-0.20
-GOLANGCI_LINT_VERSION ?= v2.0.2
+GOLANGCI_LINT_VERSION ?= v2.1.6
 GOLANGCI_LINT_TIMEOUT ?= 1m
 HELM_VERSION ?= v3.17.2
 KIND_VERSION ?= v0.29.0

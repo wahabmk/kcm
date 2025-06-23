@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"testing"
 
-	fluxcdmeta "github.com/fluxcd/pkg/apis/meta"
+	fluxmeta "github.com/fluxcd/pkg/apis/meta"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/stretchr/testify/require"
 )
@@ -50,25 +50,31 @@ func Test_priorityToTier(t *testing.T) {
 func Test_nonEmptyRegistryCredentialsConfig(t *testing.T) {
 	testNamespace := "default"
 	testSecretName := "secret"
+	testCertSecretName := "cert-secret"
 	for _, tc := range []struct {
 		tcName string
 		repo   *sourcev1.HelmRepository
 	}{
 		{tcName: "with insecure registry", repo: &sourcev1.HelmRepository{Spec: sourcev1.HelmRepositorySpec{Insecure: true}}},
 		{tcName: "with secret ref", repo: &sourcev1.HelmRepository{Spec: sourcev1.HelmRepositorySpec{
-			SecretRef: &fluxcdmeta.LocalObjectReference{
+			SecretRef: &fluxmeta.LocalObjectReference{
 				Name: testSecretName,
 			},
 		}}},
 		{tcName: "with insecure registry and secret ref", repo: &sourcev1.HelmRepository{Spec: sourcev1.HelmRepositorySpec{
 			Insecure: true,
-			SecretRef: &fluxcdmeta.LocalObjectReference{
+			SecretRef: &fluxmeta.LocalObjectReference{
 				Name: testSecretName,
+			},
+		}}},
+		{tcName: "with certsecret ref", repo: &sourcev1.HelmRepository{Spec: sourcev1.HelmRepositorySpec{
+			CertSecretRef: &fluxmeta.LocalObjectReference{
+				Name: testCertSecretName,
 			},
 		}}},
 	} {
 		t.Run(tc.tcName, func(t *testing.T) {
-			config := generateRegistryCredentialsConfig(testNamespace, tc.repo.Spec.Insecure, tc.repo.Spec.SecretRef)
+			config := generateRegistryCredentialsConfig(testNamespace, tc.repo.Spec.Insecure, tc.repo.Spec.SecretRef, tc.repo.Spec.CertSecretRef)
 			require.NotNil(t, config)
 			require.Equal(t, tc.repo.Spec.Insecure, config.PlainHTTP)
 
@@ -81,6 +87,11 @@ func Test_nonEmptyRegistryCredentialsConfig(t *testing.T) {
 				require.Equal(t, testNamespace, config.CredentialsSecretRef.Namespace)
 			} else {
 				require.Nil(t, config.CredentialsSecretRef)
+			}
+
+			if tc.repo.Spec.CertSecretRef != nil {
+				require.Equal(t, testCertSecretName, config.CASecretRef.Name)
+				require.Equal(t, testNamespace, config.CASecretRef.Namespace)
 			}
 		})
 	}

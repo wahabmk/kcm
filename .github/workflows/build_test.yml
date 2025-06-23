@@ -77,6 +77,30 @@ jobs:
           ref: ${{ fromJSON(steps.pr.outputs.result) }}
           fetch-depth: 0
 
+      - name: Validate PR title and commit message
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Conventional commit regex (simplified)
+          CONVENTIONAL_REGEX='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-zA-Z0-9_-]+\))??!?:.+$'
+
+          pr_title="${{ github.event.pull_request.title }}"
+          echo "PR title: $pr_title"
+
+          commit_title="$(git log -2 --pretty=%s | tail -n 1)"
+          echo "Commit title: $commit_title"
+
+          if [[ ! "$pr_title" =~ $CONVENTIONAL_REGEX ]]; then
+            echo "::error::PR title does not follow Conventional Commits format: https://www.conventionalcommits.org/"
+            exit 1
+          fi
+
+          if [[ ! "$commit_title" =~ $CONVENTIONAL_REGEX ]]; then
+            echo "::error::Commit message does not follow Conventional Commits format: https://www.conventionalcommits.org/"
+            exit 1
+          fi
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -88,6 +112,8 @@ jobs:
         with:
           path: |
             ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/.cache/golangci-lint
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
@@ -96,11 +122,22 @@ jobs:
         run: GOLANGCI_LINT_TIMEOUT=10m make lint
 
       - name: Verify all generated pieces are up-to-date
-        run: make generate-all && git add -N . && git diff --exit-code
+        env:
+          BASE_COMMIT: "origin/${{ github.event.pull_request.base.ref }}"
+        shell: bash
+        run: |
+          make generate-all
+          git add -N .
+          if ! git diff --exit-code; then
+            echo "::error::Generated files are out of date. Please run 'make generate-all'."
+            git diff --name-only
+            exit 1
+          fi
 
       - name: Unit tests
-        run: |
-          make test
+        env:
+          BASE_COMMIT: "origin/${{ github.event.pull_request.base.ref }}"
+        run: make test
 
       - name: Get outputs
         id: vars
@@ -138,6 +175,7 @@ jobs:
         with:
           path: |
             ~/go/pkg/mod
+            ~/.cache/go-build
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
@@ -147,8 +185,7 @@ jobs:
           GINKGO_LABEL_FILTER: 'controller'
           CLUSTER_DEPLOYMENT_PREFIX: ${{ needs.lint-test.outputs.clusterprefix }}
           VERSION: ${{ needs.lint-test.outputs.version }}
-        run: |
-          make test-e2e
+        run: make test-e2e
 
       - name: Archive test results
         uses: actions/upload-artifact@v4
@@ -197,6 +234,7 @@ jobs:
         with:
           path: |
             ~/go/pkg/mod
+            ~/.cache/go-build
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
@@ -271,6 +309,7 @@ jobs:
         with:
           path: |
             ~/go/pkg/mod
+            ~/.cache/go-build
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
@@ -290,8 +329,8 @@ jobs:
           GINKGO_LABEL_FILTER: 'provider:cloud'
           CLUSTER_DEPLOYMENT_PREFIX: ${{ needs.lint-test.outputs.clusterprefix }}
           VERSION: ${{ needs.lint-test.outputs.version }}
-        run: |
-          make test-e2e
+        run: make test-e2e
+
       - name: Archive test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -349,6 +388,7 @@ jobs:
         with:
           path: |
             ~/go/pkg/mod
+            ~/.cache/go-build
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
@@ -368,8 +408,7 @@ jobs:
           GINKGO_LABEL_FILTER: 'provider:onprem'
           CLUSTER_DEPLOYMENT_PREFIX: ${{ needs.lint-test.outputs.clusterprefix }}
           VERSION: ${{ needs.lint-test.outputs.version }}
-        run: |
-          make test-e2e
+        run: make test-e2e
 
       - name: Archive test results
         uses: actions/upload-artifact@v4

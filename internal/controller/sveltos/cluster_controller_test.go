@@ -53,7 +53,7 @@ var _ = Describe("SveltosCluster Controller Integration Tests", func() {
 
 		logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
-		ctx, cancel = context.WithCancel(context.TODO())
+		ctx, cancel = context.WithCancel(context.TODO()) //nolint:fatcontext // on purpose
 		testEnv = &envtest.Environment{
 			CRDDirectoryPaths: []string{
 				filepath.Join("..", "..", "..", "templates", "provider", "kcm", "templates", "crds"),
@@ -67,7 +67,7 @@ var _ = Describe("SveltosCluster Controller Integration Tests", func() {
 			// Note that you must have the required binaries setup under the bin directory to perform
 			// the tests directly. When we run make test it will be setup and used automatically.
 			BinaryAssetsDirectory: filepath.Join("..", "..", "bin", "k8s",
-				fmt.Sprintf("1.32.0-%s-%s", runtime.GOOS, runtime.GOARCH)),
+				fmt.Sprintf("1.33.0-%s-%s", runtime.GOOS, runtime.GOARCH)),
 		}
 
 		cfg, err := testEnv.Start()

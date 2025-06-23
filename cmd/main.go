@@ -21,9 +21,9 @@ import (
 	"os"
 	"strings"
 
-	hcv2 "github.com/fluxcd/helm-controller/api/v2"
+	helmcontrollerv2 "github.com/fluxcd/helm-controller/api/v2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
-	sveltosv1beta1 "github.com/projectsveltos/addon-controller/api/v1beta1"
+	addoncontrollerv1beta1 "github.com/projectsveltos/addon-controller/api/v1beta1"
 	libsveltosv1beta1 "github.com/projectsveltos/libsveltos/api/v1beta1"
 	infobloxv1alpha1 "github.com/telekom/cluster-api-ipam-provider-infoblox/api/v1alpha1"
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -77,8 +77,8 @@ func init() {
 
 	utilruntime.Must(kcmv1.AddToScheme(scheme))
 	utilruntime.Must(sourcev1.AddToScheme(scheme))
-	utilruntime.Must(hcv2.AddToScheme(scheme))
-	utilruntime.Must(sveltosv1beta1.AddToScheme(scheme))
+	utilruntime.Must(helmcontrollerv2.AddToScheme(scheme))
+	utilruntime.Must(addoncontrollerv1beta1.AddToScheme(scheme))
 	utilruntime.Must(libsveltosv1beta1.AddToScheme(scheme))
 	utilruntime.Must(ipamv1.AddToScheme(scheme))
 	utilruntime.Must(capioperatorv1.AddToScheme(scheme)) // required only for the mgmt status updates
@@ -132,8 +132,8 @@ func main() {
 	flag.StringVar(&registryCredentialsSecretName, "registry-creds-secret", "",
 		"Name of a Secret containing authentication credentials for the registry.")
 	flag.StringVar(&registryCertSecretName, "registry-cert-secret-name", "",
-		"Name of a Secret containing a client certificate (`tls.crt`) and private key (`tls.key`) and/or a CA certificate (`ca.crt`) for the registry endpoint")
-	flag.StringVar(&k0sURLCertSecretName, "k0s-url-cert-secret-name", "", "Name of a Secret containing a client certificate (`tls.crt`) and private key (`tls.key`) and (optionally) a CA certificate (`ca.crt`) for the k0s download URL")
+		"Name of a Secret containing root CA certificate (`ca.crt`) for connecting to the registry endpoint.")
+	flag.StringVar(&k0sURLCertSecretName, "k0s-url-cert-secret-name", "", "Name of a Secret containing root CA certificate (`ca.crt`) for the k0s download URL.")
 	flag.BoolVar(&insecureRegistry, "insecure-registry", false, "Allow connecting to an HTTP registry.")
 	flag.BoolVar(&createManagement, "create-management", true, "Create a Management object with default configuration upon initial installation.")
 	flag.BoolVar(&createAccessManagement, "create-access-management", true,
