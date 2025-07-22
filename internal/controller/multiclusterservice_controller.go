@@ -313,18 +313,18 @@ func (r *MultiClusterServiceReconciler) setClustersServicesReadinessConditions(c
 		return fmt.Errorf("failed to construct selector from MultiClusterService %s selector: %w", client.ObjectKeyFromObject(mcs), err)
 	}
 
-	clusters := &metav1.PartialObjectMetadataList{}
-	clusters.SetGroupVersionKind(schema.GroupVersionKind{
+	capiClusters := &metav1.PartialObjectMetadataList{}
+	capiClusters.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "cluster.x-k8s.io",
 		Version: "v1beta1",
 		Kind:    "Cluster",
 	})
-	if err := r.Client.List(ctx, clusters, client.MatchingLabelsSelector{Selector: sel}); err != nil {
+	if err := r.Client.List(ctx, capiClusters, client.MatchingLabelsSelector{Selector: sel}); err != nil {
 		return fmt.Errorf("failed to list partial Clusters: %w", err)
 	}
 
 	ready := 0
-	for _, cluster := range clusters.Items {
+	for _, cluster := range capiClusters.Items {
 		key := client.ObjectKey{Namespace: cluster.Namespace, Name: cluster.Name}
 		cld := new(kcmv1.ClusterDeployment)
 		if err := r.Client.Get(ctx, key, cld); err != nil {
@@ -337,7 +337,31 @@ func (r *MultiClusterServiceReconciler) setClustersServicesReadinessConditions(c
 		}
 	}
 
-	desiredClusters, desiredServices := len(clusters.Items), len(clusters.Items)*len(mcs.Spec.ServiceSpec.Services)
+	// There is also SveltosCluster type to consider.
+	sveltosClusters := &metav1.PartialObjectMetadataList{}
+	sveltosClusters.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "lib.projectsveltos.io",
+		Version: "v1beta1",
+		Kind:    "SveltosCluster",
+	})
+	if err := r.Client.List(ctx, sveltosClusters, client.MatchingLabelsSelector{Selector: sel}); err != nil {
+		return fmt.Errorf("failed to list partial SveltosClusters: %w", err)
+	}
+
+	for _, cluster := range sveltosClusters.Items {
+		key := client.ObjectKey{Namespace: cluster.Namespace, Name: cluster.Name}
+		sc := libsveltosv1beta1.SveltosCluster{}
+		if err := r.Client.Get(ctx, key, &sc); err != nil {
+			return fmt.Errorf("failed to get SveltosCluster %s: %w", key.String(), err)
+		}
+
+		if sc.Status.Ready {
+			ready++
+		}
+	}
+
+	desiredClusters := len(capiClusters.Items) + len(sveltosClusters.Items)
+	desiredServices := desiredClusters * len(mcs.Spec.ServiceSpec.Services)
 	c := metav1.Condition{
 		Type:    kcmv1.ClusterInReadyStateCondition,
 		Status:  metav1.ConditionTrue,
