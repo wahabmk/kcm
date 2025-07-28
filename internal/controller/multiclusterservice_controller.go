@@ -28,6 +28,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -312,19 +313,32 @@ func (r *MultiClusterServiceReconciler) setClustersServicesReadinessConditions(c
 		return fmt.Errorf("failed to construct selector from MultiClusterService %s selector: %w", client.ObjectKeyFromObject(mcs), err)
 	}
 
-	capiClusters := &kcmv1.ClusterDeploymentList{}
+	// Fetch matching CAPI clusters/
+	capiClusters := &metav1.PartialObjectMetadataList{}
+	capiClusters.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "cluster.x-k8s.io",
+		Version: "v1beta1",
+		Kind:    "Cluster",
+	})
 	if err := r.Client.List(ctx, capiClusters, client.MatchingLabelsSelector{Selector: sel}); err != nil {
-		return fmt.Errorf("failed to list CAPI Clusters: %w", err)
+		return fmt.Errorf("failed to list partial Clusters: %w", err)
 	}
 
 	ready := 0
 	for _, cluster := range capiClusters.Items {
-		rc := apimeta.FindStatusCondition(cluster.Status.Conditions, kcmv1.ReadyCondition)
+		key := client.ObjectKey{Namespace: cluster.Namespace, Name: cluster.Name}
+		cld := new(kcmv1.ClusterDeployment)
+		if err := r.Client.Get(ctx, key, cld); err != nil {
+			return fmt.Errorf("failed to get ClusterDeployment %s: %w", key.String(), err)
+		}
+
+		rc := apimeta.FindStatusCondition(cld.Status.Conditions, kcmv1.ReadyCondition)
 		if rc != nil && rc.Status == metav1.ConditionTrue {
 			ready++
 		}
 	}
 
+	// Fetch matching Sveltos clusters.
 	sveltosClusters := &libsveltosv1beta1.SveltosClusterList{}
 	if err := r.Client.List(ctx, sveltosClusters, client.MatchingLabelsSelector{Selector: sel}); err != nil {
 		return fmt.Errorf("failed to list SveltosClusters: %w", err)
