@@ -376,6 +376,8 @@ func (r *ServiceSetReconciler) ensureProfile(ctx context.Context, serviceSet *kc
 	}
 
 	if serviceSet.Spec.Provider.SelfManagement {
+		// wahab: I don't think we need to create a ClusterProfile object for
+		// self management. The Profile object should do just as well.
 		if err = r.createOrUpdateClusterProfile(ctx, serviceSet, spec); err != nil {
 			return fmt.Errorf("failed to create or update ClusterProfile: %w", err)
 		}
@@ -478,6 +480,9 @@ func (r *ServiceSetReconciler) profileSpec(ctx context.Context, serviceSet *kcmv
 			LabelSelector: metav1.LabelSelector{
 				MatchLabels: map[string]string{
 					"k0rdent.mirantis.com/management-cluster": "true",
+					// wahab: do we really need this label?
+					// Is there a configuration in which sveltos can be deployed
+					// where this label is not present?
 					"sveltos-agent": "present",
 				},
 			},
