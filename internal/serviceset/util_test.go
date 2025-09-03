@@ -222,3 +222,7 @@ func Test_ServicesToDeploy(t *testing.T) {
 		})
 	}
 }
+
+func Test_FilterServiceDependencies(t *testing.T) {
+	// To be filled...
+}

@@ -464,8 +464,16 @@ func (r *MultiClusterServiceReconciler) createOrUpdateServiceSet(
 		return fmt.Errorf("failed to determine upgrade paths for services: %w", err)
 	}
 	l.V(1).Info("Determined upgrade paths for services", "upgradePaths", upgradePaths)
-	resultingServices := serviceset.ServicesToDeploy(upgradePaths, mcs.Spec.ServiceSpec.Services, serviceSet.Spec.Services)
+
+	filteredServices, err := serviceset.FilterServiceDependencies(ctx, r.Client, cd.GetName(), cd.GetNamespace(), mcs.Spec.ServiceSpec.Services)
+	if err != nil {
+		return fmt.Errorf("failed to filter for services that are not dependent on any other service: %w", err)
+	}
+	l.V(1).Info("Services to deploy after filtering services that are not dependent on any other service", "services", filteredServices)
+
+	resultingServices := serviceset.ServicesToDeploy(upgradePaths, filteredServices, serviceSet.Spec.Services)
 	l.V(1).Info("Services to deploy", "services", resultingServices)
+
 	serviceSet, err = serviceset.NewBuilder(cd, serviceSet, provider.Spec.Selector).
 		WithMultiClusterService(mcs).
 		WithServicesToDeploy(resultingServices).Build()
