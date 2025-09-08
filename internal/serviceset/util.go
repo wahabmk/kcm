@@ -133,7 +133,7 @@ func FilterServiceDependencies(ctx context.Context, c client.Client, cdNamespace
 
 	// For each of the successfully deployed services,
 	// decrement the depends on count of its dependents.
-	for svc, _ := range deployedServices {
+	for svc := range deployedServices {
 		for _, d := range dependents[ServiceKey(svc.Namespace, svc.Name)] {
 			dependsOnCount[ServiceKey(d.Namespace, d.Name)]--
 		}

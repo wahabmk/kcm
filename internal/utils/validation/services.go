@@ -149,7 +149,7 @@ func ValidateServiceDependency(services []kcmv1.Service) error {
 		return nil
 	}
 
-	servicesMap := map[client.ObjectKey]kcmv1.Service{}
+	servicesMap := make(map[client.ObjectKey]kcmv1.Service)
 	for _, svc := range services {
 		servicesMap[serviceset.ServiceKey(svc.Namespace, svc.Name)] = svc
 	}
@@ -174,7 +174,7 @@ func ValidateServiceDependencyCycle(services []kcmv1.Service) error {
 		return nil
 	}
 
-	servicesMap := map[client.ObjectKey]kcmv1.Service{}
+	servicesMap := make(map[client.ObjectKey]kcmv1.Service)
 	for _, svc := range services {
 		servicesMap[serviceset.ServiceKey(svc.Namespace, svc.Name)] = svc
 	}
@@ -192,7 +192,7 @@ func ValidateServiceDependencyCycle(services []kcmv1.Service) error {
 // dependency graph and returns on the first occurence of a cycle.
 func hasDependencyCycle(key client.ObjectKey, visited map[client.ObjectKey]bool, servicesMap map[client.ObjectKey]kcmv1.Service) error {
 	if visited == nil {
-		visited = map[client.ObjectKey]bool{}
+		visited = make(map[client.ObjectKey]bool)
 	}
 
 	// Add current service to visited.

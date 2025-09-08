@@ -223,6 +223,6 @@ func Test_ServicesToDeploy(t *testing.T) {
 	}
 }
 
-func Test_FilterServiceDependencies(t *testing.T) {
+func Test_FilterServiceDependencies(_ *testing.T) {
 	// To be filled...
 }
