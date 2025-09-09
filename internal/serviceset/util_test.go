@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -238,7 +239,7 @@ func Test_FilterServiceDependencies(t *testing.T) {
 		result := make([]map[client.ObjectKey]struct{}, len(services))
 		for i, svc := range services {
 			result[i] = map[client.ObjectKey]struct{}{
-				ServiceKey(svc.Namespace, svc.Name): struct{}{},
+				ServiceKey(svc.Namespace, svc.Name): {},
 			}
 		}
 		return result
@@ -353,9 +354,9 @@ func Test_FilterServiceDependencies(t *testing.T) {
 				Build()
 
 			filtered, err := FilterServiceDependencies(t.Context(), client, tc.cdNamespace, tc.cdName, tc.desiredServices)
-			assert.NoError(t, err)
-			assert.Equal(t, len(tc.expected), len(filtered))
-			assert.ElementsMatch(t, getRelevantFields(tc.expected), getRelevantFields(filtered))
+			require.NoError(t, err)
+			require.Len(t, tc.expected, len(filtered))
+			require.ElementsMatch(t, getRelevantFields(tc.expected), getRelevantFields(filtered))
 		})
 	}
 }

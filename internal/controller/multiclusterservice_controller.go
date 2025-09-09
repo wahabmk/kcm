@@ -465,7 +465,7 @@ func (r *MultiClusterServiceReconciler) createOrUpdateServiceSet(
 	}
 	l.V(1).Info("Determined upgrade paths for services", "upgradePaths", upgradePaths)
 
-	filteredServices, err := serviceset.FilterServiceDependencies(ctx, r.Client, cd.GetName(), cd.GetNamespace(), mcs.Spec.ServiceSpec.Services)
+	filteredServices, err := serviceset.FilterServiceDependencies(ctx, r.Client, cd.GetNamespace(), cd.GetName(), mcs.Spec.ServiceSpec.Services)
 	if err != nil {
 		return fmt.Errorf("failed to filter for services that are not dependent on any other service: %w", err)
 	}
