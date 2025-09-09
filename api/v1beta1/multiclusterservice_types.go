@@ -106,10 +106,10 @@ type Service struct {
 	Namespace string `json:"namespace,omitempty"`
 	// ValuesFrom can reference a ConfigMap or Secret containing helm values.
 	ValuesFrom []ValuesFrom `json:"valuesFrom,omitempty"`
-	// Disable can be set to disable handling of this service.
-	Disable bool `json:"disable,omitempty"`
 	// DependsOn specifies a list of other services that this service depends on.
 	DependsOn []ServiceDependsOn `json:"dependsOn,omitempty"`
+	// Disable can be set to disable handling of this service.
+	Disable bool `json:"disable,omitempty"`
 }
 
 // ServiceDependsOn identifies a service by its release name and namespace.

@@ -189,7 +189,7 @@ func ValidateServiceDependencyCycle(services []kcmv1.Service) error {
 }
 
 // hasDependencyCycle uses DFS to check for cycles in the
-// dependency graph and returns on the first occurence of a cycle.
+// dependency graph and returns on the first occurrence of a cycle.
 func hasDependencyCycle(key client.ObjectKey, visited map[client.ObjectKey]bool, servicesMap map[client.ObjectKey]kcmv1.Service) error {
 	if visited == nil {
 		visited = make(map[client.ObjectKey]bool)

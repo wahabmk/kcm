@@ -17,8 +17,9 @@ package validation
 import (
 	"testing"
 
-	kcmv1 "github.com/K0rdent/kcm/api/v1beta1"
 	"github.com/stretchr/testify/require"
+
+	kcmv1 "github.com/K0rdent/kcm/api/v1beta1"
 )
 
 func TestValidateServiceDependency(t *testing.T) {

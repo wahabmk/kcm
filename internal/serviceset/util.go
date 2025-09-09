@@ -96,7 +96,7 @@ func ServicesUpgradePaths(
 
 // FilterServiceDependencies filters out & retunrs the services
 // from desired services that are NOT dependent on any other service.
-func FilterServiceDependencies(ctx context.Context, c client.Client, cdNamespace string, cdName string, desiredServices []kcmv1.Service) ([]kcmv1.Service, error) {
+func FilterServiceDependencies(ctx context.Context, c client.Client, cdNamespace, cdName string, desiredServices []kcmv1.Service) ([]kcmv1.Service, error) {
 	// Map of services with their indexes.
 	serviceIdx := make(map[client.ObjectKey]int)
 	// Map of services with the count of other services they depend on.
