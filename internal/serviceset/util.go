@@ -123,6 +123,7 @@ func FilterServiceDependencies(ctx context.Context, c client.Client, cdNamespace
 		return nil, fmt.Errorf("failed to list ServiceSets: %w", err)
 	}
 
+	// fmt.Printf(">>>>>>>>>>>> items=%v\n", len(serviceSets.Items))
 	for _, sset := range serviceSets.Items {
 		for _, svc := range sset.Status.Services {
 			if svc.State == kcmv1.ServiceStateDeployed {
@@ -149,6 +150,8 @@ func FilterServiceDependencies(ctx context.Context, c client.Client, cdNamespace
 		}
 	}
 
+	// fmt.Printf(">>>>>>%v\n", dependsOnCount)
+	// fmt.Printf(">>>>>>> FILTERED=%v\n", filtered)
 	return filtered, nil
 }
 
