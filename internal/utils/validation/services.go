@@ -143,8 +143,22 @@ func ValidateUpgradePaths(services []kcmv1.Service, upgradePaths []kcmv1.Service
 	return errs
 }
 
-// ValidateServiceDependency validates is all dependencies of services has been defined as well.
-func ValidateServiceDependency(services []kcmv1.Service) error {
+// ValidateServiceDependencyOverall calls all of the functions
+// related to service dependency validation one by one.
+func ValidateServiceDependencyOverall(services []kcmv1.Service) error {
+	if err := validateServiceDependency(services); err != nil {
+		return fmt.Errorf("failed service dependency validation: %w", err)
+	}
+
+	if err := validateServiceDependencyCycle(services); err != nil {
+		return fmt.Errorf("failed service dependency cycle validation: %w", err)
+	}
+
+	return nil
+}
+
+// validateServiceDependency validates is all dependencies of services has been defined as well.
+func validateServiceDependency(services []kcmv1.Service) error {
 	if len(services) == 0 {
 		return nil
 	}
@@ -168,8 +182,8 @@ func ValidateServiceDependency(services []kcmv1.Service) error {
 	return err
 }
 
-// ValidateServiceDependencyCycle validates if there is a cycle in the services dependency graph.
-func ValidateServiceDependencyCycle(services []kcmv1.Service) error {
+// validateServiceDependencyCycle validates if there is a cycle in the services dependency graph.
+func validateServiceDependencyCycle(services []kcmv1.Service) error {
 	if len(services) == 0 {
 		return nil
 	}

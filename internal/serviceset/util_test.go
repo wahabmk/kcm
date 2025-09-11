@@ -230,121 +230,177 @@ func Test_ServicesToDeploy(t *testing.T) {
 }
 
 func Test_FilterServiceDependencies(t *testing.T) {
+	cdNamespace, cdName := "cd1-ns", "cd1"
+
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(kcmv1.AddToScheme(scheme))
 
-	getRelevantFields := func(services []kcmv1.Service) []map[client.ObjectKey]struct{} {
-		t.Helper()
-		result := make([]map[client.ObjectKey]struct{}, len(services))
-		for i, svc := range services {
-			result[i] = map[client.ObjectKey]struct{}{
-				ServiceKey(svc.Namespace, svc.Name): {},
-			}
-		}
-		return result
-	}
+	A := testService{kcmv1.Service{Namespace: "A", Name: "a"}}
+	B := testService{kcmv1.Service{Namespace: "B", Name: "b"}}
 
 	for _, tc := range []struct {
 		testName        string
-		cdNamespace     string
-		cdName          string
-		desiredServices []kcmv1.Service
+		desiredServices []testService
 		objects         []client.Object
-		expected        []kcmv1.Service
+		expected        []testService
 	}{
 		{
-			testName:    "test0",
-			cdNamespace: "cd1-ns", cdName: "cd1",
+			testName: "empty",
 		},
 		{
-			testName:    "test1",
-			cdNamespace: "cd1-ns", cdName: "cd1",
-			desiredServices: []kcmv1.Service{
-				{Namespace: "A", Name: "a"},
-			},
+			testName:        "service A provisioning",
+			desiredServices: []testService{A},
 			objects: []client.Object{
 				&kcmv1.ServiceSet{
-					ObjectMeta: metav1.ObjectMeta{Namespace: "cd1-ns", Name: "cd1"},
-					Spec:       kcmv1.ServiceSetSpec{Cluster: "cd1"},
+					ObjectMeta: metav1.ObjectMeta{Namespace: cdNamespace, Name: cdName},
+					Spec:       kcmv1.ServiceSetSpec{Cluster: cdName},
 					Status: kcmv1.ServiceSetStatus{
 						Services: []kcmv1.ServiceState{
-							{Namespace: "A", Name: "a", State: kcmv1.ServiceStateProvisioning},
+							{Namespace: A.Namespace, Name: A.Name, State: kcmv1.ServiceStateProvisioning},
 						},
 					},
 				},
 			},
-			expected: []kcmv1.Service{
-				{Namespace: "A", Name: "a"},
-			},
+			expected: []testService{A},
 		},
 		{
-			testName:    "test2",
-			cdNamespace: "cd1-ns", cdName: "cd1",
-			desiredServices: []kcmv1.Service{
-				{Namespace: "A", Name: "a"},
+			testName: "service A deployed",
+			desiredServices: []testService{
+				A,
 			},
 			objects: []client.Object{
 				&kcmv1.ServiceSet{
-					ObjectMeta: metav1.ObjectMeta{Namespace: "cd1-ns", Name: "cd1"},
-					Spec:       kcmv1.ServiceSetSpec{Cluster: "cd1"},
+					ObjectMeta: metav1.ObjectMeta{Namespace: cdNamespace, Name: cdName},
+					Spec:       kcmv1.ServiceSetSpec{Cluster: cdName},
 					Status: kcmv1.ServiceSetStatus{
 						Services: []kcmv1.ServiceState{
-							{Namespace: "A", Name: "a", State: kcmv1.ServiceStateDeployed},
+							{Namespace: A.Namespace, Name: A.Name, State: kcmv1.ServiceStateDeployed},
 						},
 					},
 				},
 			},
-			expected: []kcmv1.Service{
-				{Namespace: "A", Name: "a"},
-			},
+			expected: []testService{A},
 		},
 		{
-			testName:    "test3",
-			cdNamespace: "cd1-ns", cdName: "cd1",
-			desiredServices: []kcmv1.Service{
-				{Namespace: "A", Name: "a"},
-				{Namespace: "B", Name: "b", DependsOn: []kcmv1.ServiceDependsOn{{Namespace: "A", Name: "a"}}},
-			},
+			testName:        "service A provisioning when B->A",
+			desiredServices: []testService{A, B.dependsOn(A)},
 			objects: []client.Object{
 				&kcmv1.ServiceSet{
-					ObjectMeta: metav1.ObjectMeta{Namespace: "cd1-ns", Name: "cd1"},
-					Spec:       kcmv1.ServiceSetSpec{Cluster: "cd1"},
+					ObjectMeta: metav1.ObjectMeta{Namespace: cdNamespace, Name: cdName},
+					Spec:       kcmv1.ServiceSetSpec{Cluster: cdName},
 					Status: kcmv1.ServiceSetStatus{
 						Services: []kcmv1.ServiceState{
-							{Namespace: "A", Name: "a", State: kcmv1.ServiceStateProvisioning},
+							{Namespace: A.Namespace, Name: A.Name, State: kcmv1.ServiceStateProvisioning},
 						},
 					},
 				},
 			},
-			expected: []kcmv1.Service{
-				{Namespace: "A", Name: "a"},
-			},
+			expected: []testService{A},
 		},
 		{
-			testName:    "test4",
-			cdNamespace: "cd1-ns", cdName: "cd1",
-			desiredServices: []kcmv1.Service{
-				{Namespace: "A", Name: "a"},
-				{Namespace: "B", Name: "b", DependsOn: []kcmv1.ServiceDependsOn{{Namespace: "A", Name: "a"}}},
-			},
+			testName:        "service A deployed when B->A",
+			desiredServices: []testService{A, B.dependsOn(A)},
 			objects: []client.Object{
 				&kcmv1.ServiceSet{
-					ObjectMeta: metav1.ObjectMeta{Namespace: "cd1-ns", Name: "cd1"},
-					Spec:       kcmv1.ServiceSetSpec{Cluster: "cd1"},
+					ObjectMeta: metav1.ObjectMeta{Namespace: cdNamespace, Name: cdName},
+					Spec:       kcmv1.ServiceSetSpec{Cluster: cdName},
 					Status: kcmv1.ServiceSetStatus{
 						Services: []kcmv1.ServiceState{
-							{Namespace: "A", Name: "a", State: kcmv1.ServiceStateDeployed},
+							{Namespace: A.Namespace, Name: A.Name, State: kcmv1.ServiceStateDeployed},
 						},
 					},
 				},
 			},
-			expected: []kcmv1.Service{
-				{Namespace: "A", Name: "a"},
-				{Namespace: "B", Name: "b"},
-			},
+			expected: []testService{A, B},
 		},
-		// TODO: Add more test cases.
+		{
+			testName: "service A deployed & B provisioning when B->A",
+			desiredServices: []testService{
+				A,
+				B.dependsOn(A),
+			},
+			objects: []client.Object{
+				&kcmv1.ServiceSet{
+					ObjectMeta: metav1.ObjectMeta{Namespace: cdNamespace, Name: cdName},
+					Spec:       kcmv1.ServiceSetSpec{Cluster: cdName},
+					Status: kcmv1.ServiceSetStatus{
+						Services: []kcmv1.ServiceState{
+							{Namespace: A.Namespace, Name: A.Name, State: kcmv1.ServiceStateDeployed},
+							{Namespace: B.Namespace, Name: B.Name, State: kcmv1.ServiceStateProvisioning},
+						},
+					},
+				},
+			},
+			expected: []testService{A, B},
+		},
+		{
+			testName:        "service A & B deployed when B->A",
+			desiredServices: []testService{A, B.dependsOn(A)},
+			objects: []client.Object{
+				&kcmv1.ServiceSet{
+					ObjectMeta: metav1.ObjectMeta{Namespace: cdNamespace, Name: cdName},
+					Spec:       kcmv1.ServiceSetSpec{Cluster: cdName},
+					Status: kcmv1.ServiceSetStatus{
+						Services: []kcmv1.ServiceState{
+							{Namespace: A.Namespace, Name: A.Name, State: kcmv1.ServiceStateDeployed},
+							{Namespace: B.Namespace, Name: B.Name, State: kcmv1.ServiceStateDeployed},
+						},
+					},
+				},
+			},
+			expected: []testService{A, B},
+		},
+		{
+			testName:        "service A deployed & B provisioning in different servicesets when B->A",
+			desiredServices: []testService{A, B.dependsOn(A)},
+			objects: []client.Object{
+				&kcmv1.ServiceSet{
+					ObjectMeta: metav1.ObjectMeta{Namespace: cdNamespace, Name: cdName},
+					Spec:       kcmv1.ServiceSetSpec{Cluster: cdName},
+					Status: kcmv1.ServiceSetStatus{
+						Services: []kcmv1.ServiceState{
+							{Namespace: A.Namespace, Name: A.Name, State: kcmv1.ServiceStateDeployed},
+						},
+					},
+				},
+				&kcmv1.ServiceSet{
+					ObjectMeta: metav1.ObjectMeta{Namespace: cdNamespace, Name: cdName + "-7sc4gx"},
+					Spec:       kcmv1.ServiceSetSpec{Cluster: cdName},
+					Status: kcmv1.ServiceSetStatus{
+						Services: []kcmv1.ServiceState{
+							{Namespace: B.Namespace, Name: B.Name, State: kcmv1.ServiceStateProvisioning},
+						},
+					},
+				},
+			},
+			expected: []testService{A, B},
+		},
+		{
+			testName:        "service A & B deployed in different servicesets when B->A",
+			desiredServices: []testService{A, B.dependsOn(A)},
+			objects: []client.Object{
+				&kcmv1.ServiceSet{
+					ObjectMeta: metav1.ObjectMeta{Namespace: cdNamespace, Name: cdName},
+					Spec:       kcmv1.ServiceSetSpec{Cluster: cdName},
+					Status: kcmv1.ServiceSetStatus{
+						Services: []kcmv1.ServiceState{
+							{Namespace: A.Namespace, Name: A.Name, State: kcmv1.ServiceStateDeployed},
+						},
+					},
+				},
+				&kcmv1.ServiceSet{
+					ObjectMeta: metav1.ObjectMeta{Namespace: cdNamespace, Name: cdName + "-7sc4gx"},
+					Spec:       kcmv1.ServiceSetSpec{Cluster: cdName},
+					Status: kcmv1.ServiceSetStatus{
+						Services: []kcmv1.ServiceState{
+							{Namespace: B.Namespace, Name: B.Name, State: kcmv1.ServiceStateDeployed},
+						},
+					},
+				},
+			},
+			expected: []testService{A, B},
+		},
 	} {
 		t.Run(tc.testName, func(t *testing.T) {
 			client := fake.NewClientBuilder().
@@ -353,10 +409,156 @@ func Test_FilterServiceDependencies(t *testing.T) {
 				WithIndex(&kcmv1.ServiceSet{}, kcmv1.ServiceSetClusterIndexKey, kcmv1.ExtractServiceSetCluster).
 				Build()
 
-			filtered, err := FilterServiceDependencies(t.Context(), client, tc.cdNamespace, tc.cdName, tc.desiredServices)
+			filtered, err := FilterServiceDependencies(t.Context(), client, cdNamespace, cdName, testServices2Services(t, tc.desiredServices))
 			require.NoError(t, err)
 			require.Len(t, tc.expected, len(filtered))
-			require.ElementsMatch(t, getRelevantFields(tc.expected), getRelevantFields(filtered))
+			require.ElementsMatch(t, relevantFields(t, testServices2Services(t, tc.expected)), relevantFields(t, filtered))
 		})
 	}
+
+}
+
+func Test_FilterServiceDependencies_Operation(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kcmv1.AddToScheme(scheme))
+
+	cdNamespace, cdName := "cd1-ns", "cd1"
+
+	A := testService{kcmv1.Service{Namespace: "A", Name: "a"}}
+	B := testService{kcmv1.Service{Namespace: "B", Name: "b"}}
+	C := testService{kcmv1.Service{Namespace: "C", Name: "c"}}
+	D := testService{kcmv1.Service{Namespace: "D", Name: "d"}}
+	E := testService{kcmv1.Service{Namespace: "E", Name: "e"}}
+	F := testService{kcmv1.Service{Namespace: "F", Name: "f"}}
+	G := testService{kcmv1.Service{Namespace: "G", Name: "g"}}
+
+	for _, tc := range []struct {
+		testName        string
+		desiredServices []testService
+		// expectedServices is a list of services (from desiredServices) expected
+		// to be returned at every iteration of the FilterServiceDependencies call.
+		expectedServices [][]testService
+	}{
+		{
+			testName: "empty",
+		},
+		{
+			testName:        "single service",
+			desiredServices: []testService{A},
+			expectedServices: [][]testService{
+				0: {A},
+			},
+		},
+		{
+			testName: "services B->A",
+			desiredServices: []testService{
+				A,
+				B.dependsOn(A),
+			},
+			expectedServices: [][]testService{
+				0: {A},
+				1: {A, B},
+			},
+		},
+		{
+			testName: "services A->D, B->D, C->EF, D->E, E, F->E, G",
+			desiredServices: []testService{
+				A.dependsOn(D),
+				B.dependsOn(D),
+				C.dependsOn(E, F),
+				D.dependsOn(E),
+				E,
+				F.dependsOn(E),
+				G,
+			},
+			expectedServices: [][]testService{
+				0: {E, G},
+				1: {E, G, D, F},
+				2: {E, G, D, F, C, A, B},
+			},
+		},
+	} {
+		t.Run(tc.testName, func(t *testing.T) {
+			var err error
+			var filtered []kcmv1.Service
+
+			ssetCD := &kcmv1.ServiceSet{
+				ObjectMeta: metav1.ObjectMeta{Namespace: cdNamespace, Name: cdName},
+				Spec:       kcmv1.ServiceSetSpec{Cluster: cdName},
+			}
+			ssetMCS := &kcmv1.ServiceSet{
+				ObjectMeta: metav1.ObjectMeta{Namespace: cdNamespace, Name: cdName + "gswge"},
+				Spec:       kcmv1.ServiceSetSpec{Cluster: cdName},
+			}
+
+			for itr := range tc.expectedServices {
+				// Divide expected services between 2 ServiceSets targeting the same cluster,
+				// where one serviceset belongs to ClusterDeployment and the other to MultiClusterService.
+				for j, svc := range filtered {
+					sstate := kcmv1.ServiceState{
+						Namespace: svc.Namespace, Name: svc.Name, State: kcmv1.ServiceStateDeployed,
+					}
+					if j%2 == 0 {
+						ssetCD.Status.Services = append(ssetCD.Status.Services, sstate)
+					} else {
+						ssetMCS.Status.Services = append(ssetMCS.Status.Services, sstate)
+					}
+				}
+
+				client := fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(ssetCD, ssetMCS).
+					WithIndex(&kcmv1.ServiceSet{}, kcmv1.ServiceSetClusterIndexKey, kcmv1.ExtractServiceSetCluster).
+					Build()
+
+				filtered, err = FilterServiceDependencies(t.Context(), client, cdNamespace, cdName, testServices2Services(t, tc.desiredServices))
+				require.NoError(t, err)
+				// For each iteration of desiredServices being filtered wrt dependencies,
+				// we expect the returned filtered services to match the expected services.
+				require.ElementsMatch(t,
+					relevantFields(t, testServices2Services(t, tc.expectedServices[itr])),
+					relevantFields(t, filtered),
+				)
+			}
+		})
+	}
+}
+
+// testService is only used for testing purposes.
+// TODO: Maybe can be used in a non-test file if we find it
+// useful in making test related to services more readable.
+type testService struct {
+	kcmv1.Service
+}
+
+func (s testService) dependsOn(services ...testService) testService {
+	for _, d := range services {
+		s.DependsOn = append(s.DependsOn, kcmv1.ServiceDependsOn{
+			Namespace: d.Namespace, Name: d.Name,
+		})
+	}
+	return s
+}
+
+func testServices2Services(t *testing.T, services []testService) []kcmv1.Service {
+	t.Helper()
+	ret := []kcmv1.Service{}
+	for _, svc := range services {
+		ret = append(ret, kcmv1.Service{
+			Namespace: svc.Namespace, Name: svc.Name, DependsOn: svc.DependsOn,
+		})
+	}
+	return ret
+}
+
+func relevantFields(t *testing.T, services []kcmv1.Service) []map[client.ObjectKey]struct{} {
+	t.Helper()
+	result := make([]map[client.ObjectKey]struct{}, len(services))
+	for i, svc := range services {
+		result[i] = map[client.ObjectKey]struct{}{
+			ServiceKey(svc.Namespace, svc.Name): {},
+		}
+	}
+	return result
 }

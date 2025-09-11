@@ -52,6 +52,9 @@ const (
 
 	// ServicesReferencesValidationCondition defines the condition of services' references validation.
 	ServicesReferencesValidationCondition = "ServicesReferencesValidation"
+
+	// ServicesDependencyValidationCondition defines the condition of services' dependencies.
+	ServicesDependencyValidationCondition = "ServicesDependencyValidation"
 )
 
 // Reasons are provided as utility, and not part of the declarative API.

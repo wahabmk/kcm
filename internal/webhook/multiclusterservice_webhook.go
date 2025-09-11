@@ -58,11 +58,7 @@ func (v *MultiClusterServiceValidator) ValidateCreate(ctx context.Context, obj r
 		return nil, fmt.Errorf("%s: %w", invalidMultiClusterServiceMsg, err)
 	}
 
-	if err := validation.ValidateServiceDependency(mcs.Spec.ServiceSpec.Services); err != nil {
-		return nil, fmt.Errorf("%s: %w", invalidMultiClusterServiceMsg, err)
-	}
-
-	if err := validation.ValidateServiceDependencyCycle(mcs.Spec.ServiceSpec.Services); err != nil {
+	if err := validation.ValidateServiceDependencyOverall(mcs.Spec.ServiceSpec.Services); err != nil {
 		return nil, fmt.Errorf("%s: %w", invalidMultiClusterServiceMsg, err)
 	}
 
@@ -80,11 +76,7 @@ func (v *MultiClusterServiceValidator) ValidateUpdate(ctx context.Context, _, ne
 		return nil, fmt.Errorf("%s: %w", invalidMultiClusterServiceMsg, err)
 	}
 
-	if err := validation.ValidateServiceDependency(mcs.Spec.ServiceSpec.Services); err != nil {
-		return nil, fmt.Errorf("%s: %w", invalidMultiClusterServiceMsg, err)
-	}
-
-	if err := validation.ValidateServiceDependencyCycle(mcs.Spec.ServiceSpec.Services); err != nil {
+	if err := validation.ValidateServiceDependencyOverall(mcs.Spec.ServiceSpec.Services); err != nil {
 		return nil, fmt.Errorf("%s: %w", invalidMultiClusterServiceMsg, err)
 	}
 
