@@ -538,6 +538,16 @@ func (r *ClusterDeploymentReconciler) updateServices(ctx context.Context, cd *kc
 	l := ctrl.LoggerFrom(ctx)
 	l.Info("Reconciling Services")
 
+	if r.IsDisabledValidationWH {
+		l.Info("Validating service dependencies")
+		err := validation.ValidateServiceDependencyOverall(cd.Spec.ServiceSpec.Services)
+		r.setCondition(cd, kcmv1.ServicesDependencyValidationCondition, err)
+		if err != nil {
+			l.Error(err, "failed to validate service dependencies, will not retrigger this error")
+			return nil
+		}
+	}
+
 	err := r.createOrUpdateServiceSet(ctx, cd)
 	if err != nil {
 		return fmt.Errorf("failed to create or update ServiceSet for ClusterDeployment %s: %w", client.ObjectKeyFromObject(cd), err)

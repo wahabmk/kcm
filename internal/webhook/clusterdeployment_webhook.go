@@ -84,11 +84,7 @@ func (v *ClusterDeploymentValidator) ValidateCreate(ctx context.Context, obj run
 		return nil, fmt.Errorf("%s: %w", invalidClusterDeploymentMsg, err)
 	}
 
-	if err := validation.ValidateServiceDependency(clusterDeployment.Spec.ServiceSpec.Services); err != nil {
-		return nil, fmt.Errorf("%s: %w", invalidMultiClusterServiceMsg, err)
-	}
-
-	if err := validation.ValidateServiceDependencyCycle(clusterDeployment.Spec.ServiceSpec.Services); err != nil {
+	if err := validation.ValidateServiceDependencyOverall(clusterDeployment.Spec.ServiceSpec.Services); err != nil {
 		return nil, fmt.Errorf("%s: %w", invalidMultiClusterServiceMsg, err)
 	}
 
@@ -136,11 +132,7 @@ func (v *ClusterDeploymentValidator) ValidateUpdate(ctx context.Context, oldObj,
 		return nil, fmt.Errorf("%s: %w", invalidClusterDeploymentMsg, err)
 	}
 
-	if err := validation.ValidateServiceDependency(newClusterDeployment.Spec.ServiceSpec.Services); err != nil {
-		return nil, fmt.Errorf("%s: %w", invalidMultiClusterServiceMsg, err)
-	}
-
-	if err := validation.ValidateServiceDependencyCycle(newClusterDeployment.Spec.ServiceSpec.Services); err != nil {
+	if err := validation.ValidateServiceDependencyOverall(newClusterDeployment.Spec.ServiceSpec.Services); err != nil {
 		return nil, fmt.Errorf("%s: %w", invalidMultiClusterServiceMsg, err)
 	}
 

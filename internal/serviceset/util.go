@@ -94,7 +94,7 @@ func ServicesUpgradePaths(
 	return servicesUpgradePaths, errs
 }
 
-// FilterServiceDependencies filters out & retunrs the services
+// FilterServiceDependencies filters out & returns the services
 // from desired services that are NOT dependent on any other service.
 func FilterServiceDependencies(ctx context.Context, c client.Client, cdNamespace, cdName string, desiredServices []kcmv1.Service) ([]kcmv1.Service, error) {
 	// Map of services with their indexes.

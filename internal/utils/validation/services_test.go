@@ -29,10 +29,10 @@ func TestValidateServiceDependency(t *testing.T) {
 		expectedErr string
 	}{
 		{
-			name: "test1",
+			name: "empty",
 		},
 		{
-			name: "test2",
+			name: "golden path",
 			services: []kcmv1.Service{
 				{Namespace: "A", Name: "a"},
 				{Namespace: "B", Name: "b"},
@@ -40,7 +40,7 @@ func TestValidateServiceDependency(t *testing.T) {
 			},
 		},
 		{
-			name: "test3",
+			name: "dependency that is not defined as a service",
 			services: []kcmv1.Service{
 				{Namespace: "A", Name: "a", DependsOn: []kcmv1.ServiceDependsOn{{Namespace: "C", Name: "c"}}},
 				{Namespace: "B", Name: "b"},
@@ -48,7 +48,7 @@ func TestValidateServiceDependency(t *testing.T) {
 			expectedErr: "dependency C/c of service A/a is not defined as a service",
 		},
 		{
-			name: "test4",
+			name: "multiple dependencies that are not defined as services",
 			services: []kcmv1.Service{
 				{Namespace: "A", Name: "a", DependsOn: []kcmv1.ServiceDependsOn{{Namespace: "C", Name: "c"}, {Namespace: "D", Name: "d"}}},
 				{Namespace: "B", Name: "b"},
@@ -58,7 +58,7 @@ func TestValidateServiceDependency(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := ValidateServiceDependency(tc.services); err != nil {
+			if err := validateServiceDependency(tc.services); err != nil {
 				require.EqualError(t, err, tc.expectedErr)
 			} else {
 				require.NoError(t, err)
@@ -74,11 +74,11 @@ func TestValidateServiceDependencyCycle(t *testing.T) {
 		isErr    bool
 	}{
 		{
-			testName: "test1",
+			testName: "empty",
 			services: []kcmv1.Service{},
 		},
 		{
-			testName: "test2",
+			testName: "single service",
 			services: []kcmv1.Service{
 				{
 					Namespace: "A", Name: "a",
@@ -86,7 +86,7 @@ func TestValidateServiceDependencyCycle(t *testing.T) {
 			},
 		},
 		{
-			testName: "test3",
+			testName: "single service illegally repeated",
 			services: []kcmv1.Service{
 				{
 					Namespace: "A", Name: "a",
@@ -97,7 +97,7 @@ func TestValidateServiceDependencyCycle(t *testing.T) {
 			},
 		},
 		{
-			testName: "test4",
+			testName: "services A->B",
 			services: []kcmv1.Service{
 				{
 					Namespace: "A", Name: "a",
@@ -109,7 +109,7 @@ func TestValidateServiceDependencyCycle(t *testing.T) {
 			},
 		},
 		{
-			testName: "test5",
+			testName: "services B->A",
 			services: []kcmv1.Service{
 				{
 					Namespace: "A", Name: "a",
@@ -121,7 +121,7 @@ func TestValidateServiceDependencyCycle(t *testing.T) {
 			},
 		},
 		{
-			testName: "test6",
+			testName: "services A->A",
 			services: []kcmv1.Service{
 				{
 					Namespace: "A", Name: "a",
@@ -131,7 +131,7 @@ func TestValidateServiceDependencyCycle(t *testing.T) {
 			isErr: true,
 		},
 		{
-			testName: "test7",
+			testName: "services A<->B",
 			services: []kcmv1.Service{
 				{
 					Namespace: "A", Name: "a",
@@ -145,7 +145,7 @@ func TestValidateServiceDependencyCycle(t *testing.T) {
 			isErr: true,
 		},
 		{
-			testName: "test8",
+			testName: "services A->BC, B->DE, C, D, E",
 			services: []kcmv1.Service{
 				{
 					Namespace: "A", Name: "a",
@@ -167,7 +167,7 @@ func TestValidateServiceDependencyCycle(t *testing.T) {
 			},
 		},
 		{
-			testName: "test9",
+			testName: "services A->BC, B->DE, C, D, E->A",
 			services: []kcmv1.Service{
 				{
 					Namespace: "A", Name: "a",
@@ -191,7 +191,7 @@ func TestValidateServiceDependencyCycle(t *testing.T) {
 			isErr: true,
 		},
 		{
-			testName: "test10",
+			testName: "services C, A->BC, D, B->DE, E->A",
 			services: []kcmv1.Service{
 				{
 					Namespace: "C", Name: "c",
@@ -216,7 +216,7 @@ func TestValidateServiceDependencyCycle(t *testing.T) {
 		},
 	} {
 		t.Run(tc.testName, func(t *testing.T) {
-			err := ValidateServiceDependencyCycle(tc.services)
+			err := validateServiceDependencyCycle(tc.services)
 			if tc.isErr {
 				require.Error(t, err)
 			} else {
