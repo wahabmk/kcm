@@ -279,6 +279,7 @@ type MultiClusterServiceSpec struct {
 	ClusterSelector metav1.LabelSelector `json:"clusterSelector,omitempty"`
 	// ServiceSpec is spec related to deployment of services.
 	ServiceSpec ServiceSpec `json:"serviceSpec,omitempty"`
+	DependsOn   []string    `json:"dependsOn,omitempty"`
 }
 
 // ServiceStatus contains details for the state of services.
