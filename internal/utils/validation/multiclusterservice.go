@@ -52,18 +52,12 @@ func validateMCSDependency(mcs *kcmv1.MultiClusterService, mcsList *kcmv1.MultiC
 		mcsList = new(kcmv1.MultiClusterServiceList)
 	}
 
-	dependsOnMap := make(map[client.ObjectKey][]client.ObjectKey)
-	for _, m := range mcsList.Items {
-		k := client.ObjectKey{Name: m.GetName()}
-		for _, d := range m.Spec.DependsOn {
-			dependsOnMap[k] = append(dependsOnMap[k], client.ObjectKey{Name: d})
-		}
-	}
+	dependencyGraph := generateDependencyGraph(mcsList)
 
 	var err error
 	for _, d := range mcs.Spec.DependsOn {
 		k := client.ObjectKey{Name: d}
-		if _, ok := dependsOnMap[k]; !ok {
+		if _, ok := dependencyGraph[k]; !ok {
 			err = errors.Join(err, fmt.Errorf("dependency %s of %s is not defined", k, client.ObjectKeyFromObject(mcs)))
 		}
 	}
@@ -80,14 +74,25 @@ func validateMCSDependencyCycle(mcs *kcmv1.MultiClusterService, mcsList *kcmv1.M
 		mcsList = new(kcmv1.MultiClusterServiceList)
 	}
 
+	// Provided mcs is our starting point to the dependency
+	// graph so adding it to the list of MultiClusterServices.
 	mcsList.Items = append(mcsList.Items, *mcs)
-	dependsOnMap := make(map[client.ObjectKey][]client.ObjectKey)
+	dependencyGraph := generateDependencyGraph(mcsList)
+
+	return hasDependencyCycle(client.ObjectKey{Name: mcs.GetName()}, nil, dependencyGraph)
+}
+
+// generateDependencyGraph returns a mapping of each MCS with the MCS it depends on as values.
+func generateDependencyGraph(mcsList *kcmv1.MultiClusterServiceList) map[client.ObjectKey][]client.ObjectKey {
+	dependencyGraph := make(map[client.ObjectKey][]client.ObjectKey)
+
 	for _, m := range mcsList.Items {
 		k := client.ObjectKey{Name: m.GetName()}
+		dependencyGraph[k] = nil // initialize as empty
 		for _, d := range m.Spec.DependsOn {
-			dependsOnMap[k] = append(dependsOnMap[k], client.ObjectKey{Name: d})
+			dependencyGraph[k] = append(dependencyGraph[k], client.ObjectKey{Name: d})
 		}
 	}
 
-	return hasDependencyCycle(client.ObjectKey{Name: mcs.GetName()}, nil, dependsOnMap)
+	return dependencyGraph
 }

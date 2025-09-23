@@ -93,5 +93,13 @@ func (v *MultiClusterServiceValidator) ValidateUpdate(ctx context.Context, _, ne
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
 func (*MultiClusterServiceValidator) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
+	// TODO: If MCS2-> MCS1, block MCS1 deletion until:
+	// 1. MCS2 is deleted first.
+	// 2. Or MCS2 is no longer dependent on MCS1.
+	//
+	// Q. What would happen in case 2?
+	// Ans. ValidateUpdate hook will be called on MCS2 and since it would no longer have
+	// MCS1 in dependsOn, the hook will pass and the within the controller everything
+	// should remain the same and the services already deployed by MCS2 should not observe any change.
 	return nil, nil
 }
