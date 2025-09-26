@@ -55,12 +55,12 @@ type MultiClusterServiceReconciler struct {
 }
 
 // Reconcile reconciles a MultiClusterService object.
-func (r *MultiClusterServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *MultiClusterServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
 	l := ctrl.LoggerFrom(ctx)
 	l.Info("Reconciling MultiClusterService")
 
 	mcs := &kcmv1.MultiClusterService{}
-	err := r.Client.Get(ctx, req.NamespacedName, mcs)
+	err = r.Client.Get(ctx, req.NamespacedName, mcs)
 	if apierrors.IsNotFound(err) {
 		l.Info("MultiClusterService not found, ignoring since object must be deleted")
 		return ctrl.Result{}, nil
@@ -69,6 +69,17 @@ func (r *MultiClusterServiceReconciler) Reconcile(ctx context.Context, req ctrl.
 		l.Error(err, "Failed to get MultiClusterService")
 		return ctrl.Result{}, err
 	}
+
+	clone := mcs.DeepCopy()
+	defer func() {
+		// we need to explicitly requeue MultiClusterService object,
+		// otherwise we'll miss if some ClusterDeployment will be updated
+		// with matching labels.
+		var requeue bool
+		if requeue, err = r.updateStatus(ctx, clone, mcs); requeue {
+			result = ctrl.Result{RequeueAfter: r.defaultRequeueTime}
+		}
+	}()
 
 	if !mcs.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, mcs)
@@ -106,17 +117,17 @@ func (r *MultiClusterServiceReconciler) reconcileUpdate(ctx context.Context, mcs
 		return ctrl.Result{RequeueAfter: r.defaultRequeueTime}, err // generation has not changed, need explicit requeue
 	}
 
-	clone := mcs.DeepCopy()
+	// clone := mcs.DeepCopy()
 
-	defer func() {
-		// we need to explicitly requeue MultiClusterService object,
-		// otherwise we'll miss if some ClusterDeployment will be updated
-		// with matching labels.
-		var requeue bool
-		if requeue, err = r.updateStatus(ctx, clone, mcs); requeue {
-			result = ctrl.Result{RequeueAfter: r.defaultRequeueTime}
-		}
-	}()
+	// defer func() {
+	// 	// we need to explicitly requeue MultiClusterService object,
+	// 	// otherwise we'll miss if some ClusterDeployment will be updated
+	// 	// with matching labels.
+	// 	var requeue bool
+	// 	if requeue, err = r.updateStatus(ctx, clone, mcs); requeue {
+	// 		result = ctrl.Result{RequeueAfter: r.defaultRequeueTime}
+	// 	}
+	// }()
 
 	if r.IsDisabledValidationWH {
 		l.Info("Validating service dependencies")
@@ -129,6 +140,7 @@ func (r *MultiClusterServiceReconciler) reconcileUpdate(ctx context.Context, mcs
 
 		l.Info("Validating MultiClusterService dependencies")
 		err = validation.ValidateMCSDependencyOverall(ctx, r.Client, mcs)
+		r.setCondition(mcs, kcmv1.MultiClusterServiceDependencyValidationCondition, err)
 		if err != nil {
 			l.Error(err, "failed to validate MultiClusterService dependencies, will not retrigger this error")
 			return ctrl.Result{}, nil
@@ -313,6 +325,17 @@ func (r *MultiClusterServiceReconciler) reconcileDelete(ctx context.Context, mcs
 		}
 	}()
 
+	if r.IsDisabledValidationWH {
+		l.Info("Validating MultiClusterService dependencies")
+		err := validation.ValidateMCSDelete(ctx, r.Client, mcs)
+		fmt.Printf("^^^^^^^^^^^^^^^^^ delete err: %s\n", err)
+		r.setCondition(mcs, kcmv1.MultiClusterServiceDependencyValidationCondition, err)
+		if err != nil {
+			l.Error(err, "failed validation for MultiClusterService deletion, will retrigger")
+			return ctrl.Result{RequeueAfter: r.defaultRequeueTime}, err
+		}
+	}
+
 	serviceSets := new(kcmv1.ServiceSetList)
 	if err := r.Client.List(ctx, serviceSets, client.MatchingFields{kcmv1.ServiceSetMultiClusterServiceIndexKey: mcs.Name}); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to list ServiceSets for MultiClusterService %s: %w", mcs.Name, err)
@@ -331,6 +354,7 @@ func (r *MultiClusterServiceReconciler) reconcileDelete(ctx context.Context, mcs
 		return ctrl.Result{RequeueAfter: r.defaultRequeueTime}, nil
 	}
 
+	fmt.Printf("\n######################## remove finalizer")
 	if controllerutil.RemoveFinalizer(mcs, kcmv1.MultiClusterServiceFinalizer) {
 		if err := r.Client.Update(ctx, mcs); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to remove finalizer %s from MultiClusterService %s: %w", kcmv1.MultiClusterServiceFinalizer, mcs.Name, err)

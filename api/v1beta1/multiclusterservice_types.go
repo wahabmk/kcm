@@ -55,6 +55,8 @@ const (
 
 	// ServicesDependencyValidationCondition defines the condition of services' dependencies.
 	ServicesDependencyValidationCondition = "ServicesDependencyValidation"
+
+	MultiClusterServiceDependencyValidationCondition = "MultiClusterServiceDependencyValidation"
 )
 
 // Reasons are provided as utility, and not part of the declarative API.
