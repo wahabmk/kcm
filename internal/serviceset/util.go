@@ -291,6 +291,7 @@ func GetServiceSetWithOperation(
 	}
 
 	serviceSetRequired := len(operationReq.Services) > 0 || operationReq.PropagateCredentials
+	fmt.Printf("\n>>>>>>>>>>>> [GetServiceSetWithOperation] serviceSetRequired=%v, err=%s\n", serviceSetRequired, err)
 	switch {
 	case err != nil:
 		if serviceSetRequired {
@@ -305,10 +306,15 @@ func GetServiceSetWithOperation(
 		l.V(1).Info("No services to deploy, ServiceSet exists", "operation", kcmv1.ServiceSetOperationDelete)
 		return serviceSet, kcmv1.ServiceSetOperationDelete, nil
 	case needsUpdate(serviceSet, operationReq.ProviderSpec, operationReq.Services):
+		// wahab: The execution should have come here, but I guess the needsUpdate func
+		// has some bug due to which it is not catching the diff in helm values.
+		// The execution reaches here if there is no error and helm value is changed,
+		// but not when there is an error. Why?
 		l.V(1).Info("Pending services to deploy, ServiceSet exists", "operation", kcmv1.ServiceSetOperationUpdate)
 		return serviceSet, kcmv1.ServiceSetOperationUpdate, nil
 	default:
 		l.V(1).Info("No actions required, ServiceSet exists", "operation", kcmv1.ServiceSetOperationNone)
+		// wahab: This is where it lands after helm value is changed after the prev one reported error
 		return serviceSet, kcmv1.ServiceSetOperationNone, nil
 	}
 }
@@ -358,10 +364,34 @@ func needsUpdate(
 		}
 	}
 
+	fmt.Printf("\n>>>>>>>>>>>>>>>>>> [needsUpdate] >>>>>>>>>>>>>>>>>>>>>>\n")
+	fmt.Printf("ObservedServiceStateMap=\n")
+	for k, v := range observedServiceStateMap {
+		fmt.Printf("%s: %v\n", k, v)
+	}
+	fmt.Printf("\nDesiredServiceStateMap=\n")
+	for k, v := range desiredServiceStateMap {
+		fmt.Printf("%s: %v\n", k, v)
+	}
+
+	eq := equality.Semantic.DeepEqual(observedServiceStateMap, desiredServiceStateMap)
+	fmt.Printf("\nAreEqual=%v\n", eq)
+	fmt.Printf("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n")
+
 	// This is comparing the spec to the status of the ServiceSet fetched from kubernetes.
 	// The difference between observed and desired services state means that ServiceSet was not fully
 	// deployed yet. Therefore we won't update ServiceSet until that.
-	if !equality.Semantic.DeepEqual(observedServiceStateMap, desiredServiceStateMap) {
+	if !eq {
+		// wahab: This is probably where the problem lies.
+		// In case of a failed helm installation, the state will not be Deployed,
+		// thus func will return false and new helm values are not reconciled in the ServiceSet.
+		//
+		// Actually this fails even before changing the helm values if the status is Failed
+		// for a helm chart. E.g:
+		// ObservedServiceStateMap=
+		// cert-manager/cert-manager: { <nil> cert-manager cert-manager cert-manager-1-18-2  Failed  []}
+		// DesiredServiceStateMap=
+		// cert-manager/cert-manager: { <nil> cert-manager cert-manager cert-manager-1-18-2  Deployed  []}
 		return false
 	}
 
