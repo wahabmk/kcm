@@ -345,8 +345,11 @@ func GetServiceSetWithOperation(
 	}
 
 	serviceSetRequired := len(operationReq.Services) > 0 || operationReq.PropagateCredentials
+	// fmt.Printf("\n>>>>>>>>>>>> [GetServiceSetWithOperation] serviceSetRequired=%v, err=%s\n", serviceSetRequired, err)
 	switch {
 	case err != nil:
+		fmt.Printf("\n>>>>>>>>>>>> [GetServiceSetWithOperation] CASE1: serviceSetRequired=%v, err=%s\n", serviceSetRequired, err)
+
 		if serviceSetRequired {
 			l.V(1).Info("Pending services to deploy, ServiceSet does not exist", "operation", kcmv1.ServiceSetOperationCreate)
 			serviceSet.SetName(operationReq.ObjectKey.Name)
@@ -356,13 +359,24 @@ func GetServiceSetWithOperation(
 		l.V(1).Info("No services to deploy, ServiceSet does not exist", "operation", kcmv1.ServiceSetOperationNone)
 		return nil, kcmv1.ServiceSetOperationNone, nil
 	case !serviceSetRequired:
+		fmt.Printf("\n>>>>>>>>>>>> [GetServiceSetWithOperation] CASE2: serviceSetRequired=%v, err=%s\n", serviceSetRequired, err)
+
 		l.V(1).Info("No services to deploy, ServiceSet exists", "operation", kcmv1.ServiceSetOperationDelete)
 		return serviceSet, kcmv1.ServiceSetOperationDelete, nil
 	case needsUpdate(serviceSet, operationReq.ProviderSpec, operationReq.Services):
+		fmt.Printf("\n>>>>>>>>>>>> [GetServiceSetWithOperation] CASE3: serviceSetRequired=%v, err=%s\n", serviceSetRequired, err)
+
+		// wahab: The execution should have come here, but I guess the needsUpdate func
+		// has some bug due to which it is not catching the diff in helm values.
+		// The execution reaches here if there is no error and helm value is changed,
+		// but not when there is an error. Why?
 		l.V(1).Info("Pending services to deploy, ServiceSet exists", "operation", kcmv1.ServiceSetOperationUpdate)
 		return serviceSet, kcmv1.ServiceSetOperationUpdate, nil
 	default:
+		fmt.Printf("\n>>>>>>>>>>>> [GetServiceSetWithOperation] CASE4: serviceSetRequired=%v, err=%s\n", serviceSetRequired, err)
+
 		l.V(1).Info("No actions required, ServiceSet exists", "operation", kcmv1.ServiceSetOperationNone)
+		// wahab: This is where it lands after helm value is changed after the prev one reported error
 		return serviceSet, kcmv1.ServiceSetOperationNone, nil
 	}
 }
@@ -373,13 +387,19 @@ func GetServiceSetWithOperation(
 // the ServiceSet's observed services' state with ClusterDeployment's desired services state.
 func needsUpdate(
 	serviceSet *kcmv1.ServiceSet,
-	providerSpec kcmv1.StateManagementProviderConfig,
-	services []kcmv1.Service,
+	providerSpec kcmv1.StateManagementProviderConfig, // wahab: coming from mcs
+	services []kcmv1.Service, // wahab: coming from mcs
 ) bool {
-	// we'll need to update provider configuration if it was changed.
-	if !equality.Semantic.DeepEqual(providerSpec, serviceSet.Spec.Provider) {
-		return true
-	}
+	// eqq := equality.Semantic.DeepEqual(providerSpec, serviceSet.Spec.Provider)
+	// fmt.Printf("\n>>>>>>>>>>>>>>>>> Entered NeedsUpdate >>>>>>>>>>>>>>>>>>>>>\n")
+	// fmt.Printf("providerSpec.name=%s, providerSpec.SelfManagement=%v, providerSpec.Config=%s\n", providerSpec.Name, providerSpec.SelfManagement, string(providerSpec.Config.Raw))
+	// fmt.Printf("serviceSet.Spec.Provider.name=%s, serviceSet.Spec.Provider.SelfManagement=%v, serviceSet.Spec.Provider.Config=%s\n", serviceSet.Spec.Provider.Name, serviceSet.Spec.Provider.SelfManagement, string(serviceSet.Spec.Provider.Config.Raw))
+	// fmt.Printf("eqq=%v\n", eqq)
+	// fmt.Println("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
+	// // we'll need to update provider configuration if it was changed.
+	// if !eqq {
+	// 	return true
+	// }
 
 	// we'll need to compare observed services' state with desired state to ensure
 	// ServiceSet was already reconciled and services are properly deployed.
@@ -412,10 +432,34 @@ func needsUpdate(
 		}
 	}
 
+	fmt.Printf("\n>>>>>>>>>>>>>>>>>> [needsUpdate] >>>>>>>>>>>>>>>>>>>>>>\n")
+	fmt.Printf("ObservedServiceStateMap=\n")
+	for k, v := range observedServiceStateMap {
+		fmt.Printf("%s: %v\n", k, v)
+	}
+	fmt.Printf("\nDesiredServiceStateMap=\n")
+	for k, v := range desiredServiceStateMap {
+		fmt.Printf("%s: %v\n", k, v)
+	}
+
+	eq := equality.Semantic.DeepEqual(observedServiceStateMap, desiredServiceStateMap)
+	fmt.Printf("\nAreEqual=%v\n", eq)
+	fmt.Printf("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n")
+
 	// This is comparing the spec to the status of the ServiceSet fetched from kubernetes.
 	// The difference between observed and desired services state means that ServiceSet was not fully
 	// deployed yet. Therefore we won't update ServiceSet until that.
-	if !equality.Semantic.DeepEqual(observedServiceStateMap, desiredServiceStateMap) {
+	if !eq {
+		// wahab: This is probably where the problem lies.
+		// In case of a failed helm installation, the state will not be Deployed,
+		// thus func will return false and new helm values are not reconciled in the ServiceSet.
+		//
+		// Actually this fails even before changing the helm values if the status is Failed
+		// for a helm chart. E.g:
+		// ObservedServiceStateMap=
+		// cert-manager/cert-manager: { <nil> cert-manager cert-manager cert-manager-1-18-2  Failed  []}
+		// DesiredServiceStateMap=
+		// cert-manager/cert-manager: { <nil> cert-manager cert-manager cert-manager-1-18-2  Deployed  []}
 		return false
 	}
 
