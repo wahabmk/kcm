@@ -56,7 +56,7 @@ const (
 	// ServicesDependencyValidationCondition defines the condition of services' dependencies.
 	ServicesDependencyValidationCondition = "ServicesDependencyValidation"
 
-	// MultiClusterDependencyValidationCondition defines the condition of MultiClusterService dependencies.
+	// MultiClusterServiceDependencyValidationCondition defines the condition of MultiClusterService dependencies.
 	MultiClusterServiceDependencyValidationCondition = "MultiClusterServiceDependencyValidation"
 )
 

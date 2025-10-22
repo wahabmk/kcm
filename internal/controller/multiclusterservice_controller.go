@@ -612,7 +612,7 @@ func (*MultiClusterServiceReconciler) setCondition(mcs *kcmv1.MultiClusterServic
 func (r *MultiClusterServiceReconciler) okToReconcileServiceSet(ctx context.Context, mcs *kcmv1.MultiClusterService, cd *kcmv1.ClusterDeployment) error {
 	var errs error
 
-	for _, dep := range mcs.Spec.DependsOn {
+	for i, dep := range mcs.Spec.DependsOn {
 		// Get the MCS this one depends on.
 		depMCSKey := client.ObjectKey{Name: dep}
 		depMCS := new(kcmv1.MultiClusterService)
@@ -653,7 +653,7 @@ func (r *MultiClusterServiceReconciler) okToReconcileServiceSet(ctx context.Cont
 			}
 
 			if deployed != len(depMCS.Spec.ServiceSpec.Services) {
-				errs = errors.Join(errs, fmt.Errorf("all services managed by ServiceSet %s owned by MultiClusterService %s not yet deployed", ssetKey, client.ObjectKeyFromObject(mcs)))
+				errs = errors.Join(errs, fmt.Errorf("not all services in ServiceSet %s (owned by MultiClusterService %s) are deployed: %d of %d read", ssetKey, client.ObjectKeyFromObject(mcs), i, len(mcs.Spec.DependsOn)))
 				continue
 			}
 		}
