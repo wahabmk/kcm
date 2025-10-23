@@ -621,13 +621,31 @@ func (r *MultiClusterServiceReconciler) okToReconcileServiceSet(ctx context.Cont
 			continue
 		}
 
+		sel, err := metav1.LabelSelectorAsSelector(&depMCS.Spec.ClusterSelector)
+		if err != nil {
+			errs = errors.Join(errs, fmt.Errorf("failed to determine if MultiClusterService %s which this depends on matches cluster %s: %w", depMCSKey, client.ObjectKeyFromObject(cd), err))
+			continue
+		}
+
+		if !sel.Matches(labels.Set(cd.Labels)) {
+			// depMCS does not match the provided CD so continue
+			continue
+		}
+
 		// Get the ServiceSet associated with provided CD and depMCS.
 		sset := new(kcmv1.ServiceSet)
 		ssetKey := serviceset.ServiceSetObjectKey(r.SystemNamespace, cd, depMCS)
-		err := r.Client.Get(ctx, ssetKey, sset)
+		err = r.Client.Get(ctx, ssetKey, sset)
 		if apierrors.IsNotFound(err) {
 			// If the ServiceSet for depMCS is not yet created, we will
 			// consider that an error so that the reconcile loop is retriggered.
+			//
+			// NOTE: We can safely retrigger here because we already checked earlier
+			// that depMCS does not match the provided CD. If that check did not exist
+			// and depMCS did not match the provided CD, then a bug may be introduced
+			// where the ServiceSet for this MCS matching CD is never created because one
+			// of the MCS (depMCS) that this MCS depends on has different selector labels
+			// so it does not match CD and the execution always returns here.
 			errs = errors.Join(errs, fmt.Errorf("serviceSet %s owned by MultiClusterService %s which this depends on not yet created: %w", ssetKey, depMCSKey, err))
 			continue
 		}
