@@ -206,12 +206,58 @@ func (r *ServiceSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
+	// This profile will either be created in the mothership or the regional cluster.
 	// first we'll ensure the profile exists and up-to-date
 	if err = r.ensureProfile(ctx, rgnClient, serviceSet); err != nil {
 		record.Warnf(serviceSet, serviceSet.Generation, kcmv1.ServiceSetEnsureProfileFailedEvent,
 			"Failed to ensure Profile for ServiceSet %s: %v", serviceSet.Name, err)
 		return ctrl.Result{}, err
 	}
+
+	/*
+		Let's say we have the following ServiceSet spec:
+		-----------------------------------
+		spec:
+			provider:
+				templateResourceRefs:
+					- resource:
+							apiVersion: v1
+							kind: Secret
+							name: imported-secret
+							namespace: default
+						identifier: ExternalSecret
+				policyRefs:
+					- kind: Secret
+						name: info
+						namespace: default
+		-----------------------------------
+
+		1. We can find out if the client is targeting the mothership cluster or regional cluster
+		   (as already done in the `getRegionalClient` func).
+
+		2. If client is targeting the mothership cluster:
+				a. The Profile object is created in the mothership cluster by `r.ensureProfile` func above.
+		    b. Nothing extra to do.
+
+		3. If client is targeting the regional cluster:
+				a. The Profile object is created in the regional cluster by `r.ensureProfile` func above.
+
+				b. For each ref in serviceset.spec.provider.config.templateResourceRefs {
+						1. copy the resource to the regional cluster.
+						2. this can be done 2 ways:
+						3. the 1st method is to copy the resource manually to the namespace
+						   specified in ref.namespace. Rhis way has to be generic because
+							 the resource can by of any Kind (as per sveltos spec).
+						4. the 2nd method is to create an extra Profile in the mothership cluster
+						   just for the purpose of using sveltos to propagate this ref to regional cluster.
+					}
+
+				c. For each ref in serviceset.spec.provider.config.policyRefs {
+				    // The same logic as 3b. if we decide to create an extra Profile,
+						// that same Profile can be used to propagate resources references in policyRefs too.
+				  }
+	*/
+
 	// then we'll collect the statuses of the services
 	requeue, err := r.collectServiceStatuses(ctx, rgnClient, serviceSet)
 	if err != nil {
