@@ -34,7 +34,7 @@ import (
 )
 
 // ObjectKey generates a unique key for a ServiceSet given the input and returns it.
-func ObjectKey(systemNamespace string, cd *kcmv1.ClusterDeployment, mcs *kcmv1.MultiClusterService) client.ObjectKey {
+func ObjectKey(systemNamespace string, cd *client.ObjectKey, mcs client.ObjectKey) client.ObjectKey {
 	// We'll use the following pattern to build ServiceSet name:
 	// <ClusterDeploymentName>-<MultiClusterServiceNameHash>
 	// this will guarantee that the ServiceSet produced by MultiClusterService
