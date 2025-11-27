@@ -186,8 +186,8 @@ func ValidateMCSConditions(ctx context.Context, cl client.Client, mcsKey client.
 }
 
 // ValidateServiceSet validates the ServiceSet associated with the provided CD and MCS.
-func ValidateServiceSet(ctx context.Context, cl client.Client, systemNamespace string, cd *kcmv1.ClusterDeployment, mcs *kcmv1.MultiClusterService) {
-	serviceSetKey := serviceset.ObjectKey(systemNamespace, cd, mcs)
+func ValidateServiceSet(ctx context.Context, cl client.Client, systemNamespace string, cd *client.ObjectKey, mcs *kcmv1.MultiClusterService) {
+	serviceSetKey := serviceset.ObjectKey(systemNamespace, cd, client.ObjectKeyFromObject(mcs))
 	services := make([]client.ObjectKey, len(mcs.Spec.ServiceSpec.Services))
 	for i, svc := range mcs.Spec.ServiceSpec.Services {
 		services[i] = client.ObjectKey{Namespace: svc.Namespace, Name: svc.Name}

@@ -573,7 +573,8 @@ func (r *MultiClusterServiceReconciler) createOrUpdateServiceSet(
 		return fmt.Errorf("failed to get StateManagementProvider %s: %w", key.String(), err)
 	}
 
-	serviceSetObjectKey := serviceset.ObjectKey(r.SystemNamespace, cd, mcs)
+	cdKey := client.ObjectKeyFromObject(cd)
+	serviceSetObjectKey := serviceset.ObjectKey(r.SystemNamespace, &cdKey, client.ObjectKeyFromObject(mcs))
 
 	opRequisites := serviceset.OperationRequisites{
 		ObjectKey:    serviceSetObjectKey,
@@ -731,7 +732,8 @@ func (r *MultiClusterServiceReconciler) okToReconcileServiceSet(ctx context.Cont
 
 		// Get the ServiceSet associated with provided CD and depMCS.
 		sset := new(kcmv1.ServiceSet)
-		ssetKey := serviceset.ObjectKey(r.SystemNamespace, cd, depMCS)
+		cdKey := client.ObjectKeyFromObject(cd)
+		ssetKey := serviceset.ObjectKey(r.SystemNamespace, &cdKey, client.ObjectKeyFromObject(depMCS))
 		err = r.Client.Get(ctx, ssetKey, sset)
 		if apierrors.IsNotFound(err) {
 			// If the ServiceSet for depMCS is not yet created, we will
