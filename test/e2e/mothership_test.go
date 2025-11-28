@@ -34,6 +34,7 @@ import (
 	"github.com/K0rdent/kcm/test/e2e/templates"
 )
 
+// Just for testing
 var _ = Context("Mothership Cluster", Label("mothership"), func() {
 	_ = Describe("MultiClusterService", Label("mothership:mcs"), Ordered, ContinueOnFailure, func() {
 		var (
