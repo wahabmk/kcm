@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	encjson "encoding/json"
+
 	"github.com/Masterminds/semver/v3"
 	fluxmeta "github.com/fluxcd/pkg/apis/meta"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
@@ -61,6 +63,7 @@ import (
 )
 
 const (
+	defaultTier             = 100
 	sveltosDriftIgnorePatch = `- op: add
   path: /metadata/annotations/projectsveltos.io~1driftDetectionIgnore
   value: ok`
@@ -454,6 +457,83 @@ func (*ServiceSetReconciler) createOrUpdateProfile(ctx context.Context, rgnClien
 	return nil
 }
 
+// func (r *ServiceSetReconciler) isEqual(ctx context.Context) (bool, error){
+// 	cl, _ := apiextensionsclientset.NewForConfig(r.Config)
+// 	// If Not Found error then just have to wait until the CRD becomes available.
+// 	crd, err := cl.ApiextensionsV1().CustomResourceDefinitions().Get(ctx, "clusterprofiles.config.projectsveltos.io", metav1.GetOptions{})
+// 	if err != nil {
+// 		return false, err
+// 	}
+
+// 	// There should be an option to fall back on default comparison if some other error.
+// 	crd.Spec.
+// }
+
+func areEqual(spec1, spec2 *addoncontrollerv1beta1.Spec) bool {
+	if spec1 == nil && spec2 == nil {
+		return true
+	}
+	if spec1 == nil || spec2 == nil {
+		return false
+	}
+
+	// s1 := spec1.DeepCopy()
+	s1 := spec1
+	if s1.SyncMode == "" {
+		s1.SyncMode = addoncontrollerv1beta1.SyncModeContinuous
+	}
+	if s1.Tier == 0 {
+		s1.Tier = defaultTier
+	}
+	if s1.StopMatchingBehavior == "" {
+		s1.StopMatchingBehavior = addoncontrollerv1beta1.WithdrawPolicies
+	}
+	for i := range s1.PolicyRefs {
+		if s1.PolicyRefs[i].DeploymentType == "" {
+			s1.PolicyRefs[i].DeploymentType = addoncontrollerv1beta1.DeploymentTypeRemote
+		}
+	}
+	for i := range s1.HelmCharts {
+		if s1.HelmCharts[i].HelmChartAction == "" {
+			s1.HelmCharts[i].HelmChartAction = addoncontrollerv1beta1.HelmChartActionInstall
+		}
+	}
+	for i := range s1.KustomizationRefs {
+		if s1.KustomizationRefs[i].DeploymentType == "" {
+			s1.KustomizationRefs[i].DeploymentType = addoncontrollerv1beta1.DeploymentTypeRemote
+		}
+	}
+
+	// s2 := spec2.DeepCopy()
+	s2 := spec2
+	if s2.SyncMode == "" {
+		s2.SyncMode = addoncontrollerv1beta1.SyncModeContinuous
+	}
+	if s2.Tier == 0 {
+		s2.Tier = defaultTier
+	}
+	if s2.StopMatchingBehavior == "" {
+		s2.StopMatchingBehavior = addoncontrollerv1beta1.WithdrawPolicies
+	}
+	for i := range s2.PolicyRefs {
+		if s2.PolicyRefs[i].DeploymentType == "" {
+			s2.PolicyRefs[i].DeploymentType = addoncontrollerv1beta1.DeploymentTypeRemote
+		}
+	}
+	for i := range s2.HelmCharts {
+		if s2.HelmCharts[i].HelmChartAction == "" {
+			s2.HelmCharts[i].HelmChartAction = addoncontrollerv1beta1.HelmChartActionInstall
+		}
+	}
+	for i := range s2.KustomizationRefs {
+		if s2.KustomizationRefs[i].DeploymentType == "" {
+			s2.KustomizationRefs[i].DeploymentType = addoncontrollerv1beta1.DeploymentTypeRemote
+		}
+	}
+
+	return equality.Semantic.DeepEqual(s1, s2)
+}
+
 func (*ServiceSetReconciler) createOrUpdateClusterProfile(ctx context.Context, rgnClient client.Client, serviceSet *kcmv1.ServiceSet, spec *addoncontrollerv1beta1.Spec) error {
 	ownerReference := metav1.NewControllerRef(serviceSet, kcmv1.GroupVersion.WithKind(kcmv1.ServiceSetKind))
 
@@ -468,10 +548,9 @@ func (*ServiceSetReconciler) createOrUpdateClusterProfile(ctx context.Context, r
 
 	annotationsUpdated := handlePauseAnnotations(&profile.ObjectMeta, serviceSet)
 
-	switch {
-	// we already excluded all errors except NotFound
-	// hence if the error is not nil, it means that the object was not found
-	case err != nil:
+	if err != nil {
+		// we already excluded all errors except NotFound
+		// hence if the error is not nil, it means that the object was not found
 		profile.Name = serviceSet.Name
 		profile.Labels = map[string]string{
 			kcmv1.KCMManagedLabelKey: kcmv1.KCMManagedLabelValue,
@@ -481,15 +560,49 @@ func (*ServiceSetReconciler) createOrUpdateClusterProfile(ctx context.Context, r
 		if err = rgnClient.Create(ctx, profile); err != nil {
 			return fmt.Errorf("failed to create ClusterProfile for ServiceSet %s: %w", serviceSet.Name, err)
 		}
-	// if profile spec is not equal to the spec we just created,
-	// we need to update it
-	case annotationsUpdated || !equality.Semantic.DeepEqual(profile.Spec, *spec):
+	}
+
+	eq := equality.Semantic.DeepEqual(profile.Spec, *spec)
+	newEq := areEqual(&profile.Spec, spec)
+	fmt.Printf("\n=================================================================\n")
+	b, _ := encjson.MarshalIndent(profile.Spec, "", "  ")
+	fmt.Printf("profile.Spec = %s\n", string(b))
+	fmt.Printf("-------------------------------------------\n")
+	b, _ = encjson.MarshalIndent(*spec, "", "  ")
+	fmt.Printf("*spec = %s\n", string(b))
+	fmt.Printf("EQUAL=%v, NewEQUAL=%v", eq, newEq)
+	fmt.Printf("\n=================================================================\n")
+
+	if annotationsUpdated || !eq {
 		profile.OwnerReferences = []metav1.OwnerReference{*ownerReference}
 		profile.Spec = *spec
 		if err = rgnClient.Update(ctx, profile); err != nil {
 			return fmt.Errorf("failed to update ClusterProfile for ServiceSet %s: %w", serviceSet.Name, err)
 		}
 	}
+
+	// switch {
+	// // we already excluded all errors except NotFound
+	// // hence if the error is not nil, it means that the object was not found
+	// case err != nil:
+	// 	profile.Name = serviceSet.Name
+	// 	profile.Labels = map[string]string{
+	// 		kcmv1.KCMManagedLabelKey: kcmv1.KCMManagedLabelValue,
+	// 	}
+	// 	profile.OwnerReferences = []metav1.OwnerReference{*ownerReference}
+	// 	profile.Spec = *spec
+	// 	if err = rgnClient.Create(ctx, profile); err != nil {
+	// 		return fmt.Errorf("failed to create ClusterProfile for ServiceSet %s: %w", serviceSet.Name, err)
+	// 	}
+	// 	// if profile spec is not equal to the spec we just created,
+	// 	// we need to update it
+	// case annotationsUpdated || !equality.Semantic.DeepEqual(profile.Spec, *spec):
+	// 	profile.OwnerReferences = []metav1.OwnerReference{*ownerReference}
+	// 	profile.Spec = *spec
+	// 	if err = rgnClient.Update(ctx, profile); err != nil {
+	// 		return fmt.Errorf("failed to update ClusterProfile for ServiceSet %s: %w", serviceSet.Name, err)
+	// 	}
+	// }
 	return nil
 }
 
@@ -1223,7 +1336,7 @@ func buildProfileSpec(config *apiextv1.JSON) (*addoncontrollerv1beta1.Spec, erro
 		return nil, fmt.Errorf("failed to unmarshal raw config to profile configuration: %w", err)
 	}
 
-	tier, err := priorityToTier(ptr.Deref(params.Priority, int32(100)))
+	tier, err := priorityToTier(ptr.Deref(params.Priority, int32(defaultTier)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert priority to tier: %w", err)
 	}
