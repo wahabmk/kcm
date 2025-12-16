@@ -61,6 +61,7 @@ import (
 )
 
 const (
+	defaultTier             = 100
 	sveltosDriftIgnorePatch = `- op: add
   path: /metadata/annotations/projectsveltos.io~1driftDetectionIgnore
   value: ok`
@@ -444,7 +445,7 @@ func (*ServiceSetReconciler) createOrUpdateProfile(ctx context.Context, rgnClien
 		}
 	// if profile spec is not equal to the spec we just created,
 	// we need to update it
-	case annotationsUpdated || !equality.Semantic.DeepEqual(profile.Spec, *spec):
+	case annotationsUpdated || !isProfileSpecEqual(&profile.Spec, spec):
 		profile.OwnerReferences = []metav1.OwnerReference{*ownerReference}
 		profile.Spec = *spec
 		if err = rgnClient.Update(ctx, profile); err != nil {
@@ -483,7 +484,7 @@ func (*ServiceSetReconciler) createOrUpdateClusterProfile(ctx context.Context, r
 		}
 	// if profile spec is not equal to the spec we just created,
 	// we need to update it
-	case annotationsUpdated || !equality.Semantic.DeepEqual(profile.Spec, *spec):
+	case annotationsUpdated || !isProfileSpecEqual(&profile.Spec, spec):
 		profile.OwnerReferences = []metav1.OwnerReference{*ownerReference}
 		profile.Spec = *spec
 		if err = rgnClient.Update(ctx, profile); err != nil {
@@ -1223,7 +1224,7 @@ func buildProfileSpec(config *apiextv1.JSON) (*addoncontrollerv1beta1.Spec, erro
 		return nil, fmt.Errorf("failed to unmarshal raw config to profile configuration: %w", err)
 	}
 
-	tier, err := priorityToTier(ptr.Deref(params.Priority, int32(100)))
+	tier, err := priorityToTier(ptr.Deref(params.Priority, int32(defaultTier)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert priority to tier: %w", err)
 	}
@@ -1553,4 +1554,72 @@ func clusterReference(serviceSet *kcmv1.ServiceSet) *corev1.ObjectReference {
 		Namespace:  serviceSet.Namespace,
 		APIVersion: kcmv1.GroupVersion.WithKind(kcmv1.ClusterDeploymentKind).GroupVersion().String(),
 	}
+}
+
+// isProfileSpecEqual compares provided Sveltos Profile spec.
+//
+// TODO: Maybe there is a better way to do it by fetching the defaults
+// from the CRD or maybe from the JSON schema if the following is implemented.
+// https://github.com/k0rdent/kcm/issues/2234.
+func isProfileSpecEqual(spec1, spec2 *addoncontrollerv1beta1.Spec) bool {
+	if spec1 == nil && spec2 == nil {
+		return true
+	}
+	if spec1 == nil || spec2 == nil {
+		return false
+	}
+
+	s1 := spec1.DeepCopy()
+	if s1.SyncMode == "" {
+		s1.SyncMode = addoncontrollerv1beta1.SyncModeContinuous
+	}
+	if s1.Tier == 0 {
+		s1.Tier = defaultTier
+	}
+	if s1.StopMatchingBehavior == "" {
+		s1.StopMatchingBehavior = addoncontrollerv1beta1.WithdrawPolicies
+	}
+	for i := range s1.PolicyRefs {
+		if s1.PolicyRefs[i].DeploymentType == "" {
+			s1.PolicyRefs[i].DeploymentType = addoncontrollerv1beta1.DeploymentTypeRemote
+		}
+	}
+	for i := range s1.HelmCharts {
+		if s1.HelmCharts[i].HelmChartAction == "" {
+			s1.HelmCharts[i].HelmChartAction = addoncontrollerv1beta1.HelmChartActionInstall
+		}
+	}
+	for i := range s1.KustomizationRefs {
+		if s1.KustomizationRefs[i].DeploymentType == "" {
+			s1.KustomizationRefs[i].DeploymentType = addoncontrollerv1beta1.DeploymentTypeRemote
+		}
+	}
+
+	s2 := spec2.DeepCopy()
+	if s2.SyncMode == "" {
+		s2.SyncMode = addoncontrollerv1beta1.SyncModeContinuous
+	}
+	if s2.Tier == 0 {
+		s2.Tier = defaultTier
+	}
+	if s2.StopMatchingBehavior == "" {
+		s2.StopMatchingBehavior = addoncontrollerv1beta1.WithdrawPolicies
+	}
+	for i := range s2.PolicyRefs {
+		if s2.PolicyRefs[i].DeploymentType == "" {
+			s2.PolicyRefs[i].DeploymentType = addoncontrollerv1beta1.DeploymentTypeRemote
+		}
+	}
+	for i := range s2.HelmCharts {
+		if s2.HelmCharts[i].HelmChartAction == "" {
+			s2.HelmCharts[i].HelmChartAction = addoncontrollerv1beta1.HelmChartActionInstall
+		}
+	}
+	for i := range s2.KustomizationRefs {
+		if s2.KustomizationRefs[i].DeploymentType == "" {
+			s2.KustomizationRefs[i].DeploymentType = addoncontrollerv1beta1.DeploymentTypeRemote
+		}
+	}
+
+	return equality.Semantic.DeepEqual(s1, s2)
 }
