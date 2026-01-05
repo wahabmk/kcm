@@ -413,7 +413,6 @@ var _ = Context("Mothership Cluster", Label("mothership"), func() {
 func buildSelfManagementMCS(name string, dependsOn []string, serviceSpec kcmv1.ServiceSpec) *kcmv1.MultiClusterService {
 	mcs := buildMCS(name, map[string]string{
 		kcmv1.K0rdentManagementClusterLabelKey: kcmv1.K0rdentManagementClusterLabelValue,
-		"sveltos-agent":                        "present",
 	}, dependsOn, serviceSpec)
 	mcs.Spec.ServiceSpec.Provider.SelfManagement = true
 	return mcs
