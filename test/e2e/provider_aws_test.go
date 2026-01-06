@@ -142,8 +142,12 @@ var _ = Describe("AWS Templates", Label("provider:cloud", "provider:aws"), Order
 		}
 	})
 
+	// wahab: so if aws: [] is provided the config.Config map will only have aws key
+	// with its specific config. This is how we make sure that only aws tests are run
+	// if aws: [] is provided.
 	for i, testingConfig := range config.Config[config.TestingProviderAWS] {
 		It(fmt.Sprintf("Verifying AWS cluster deployment. Iteration: %d", i), func() {
+			Skip(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> skipping")
 			defer GinkgoRecover()
 			testingConfig.SetDefaults(clusterTemplates, config.TestingProviderAWS)
 

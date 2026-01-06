@@ -30,14 +30,15 @@ import (
 type TestingProvider string
 
 const (
-	TestingProviderAWS       TestingProvider = "aws"
-	TestingProviderAzure     TestingProvider = "azure"
-	TestingProviderGCP       TestingProvider = "gcp"
-	TestingProviderOpenstack TestingProvider = "openstack"
-	TestingProviderVsphere   TestingProvider = "vsphere"
-	TestingProviderAdopted   TestingProvider = "adopted"
-	TestingProviderRemote    TestingProvider = "remote"
-	TestingProviderDocker    TestingProvider = "docker"
+	TestingProviderAWS        TestingProvider = "aws"
+	TestingProviderAzure      TestingProvider = "azure"
+	TestingProviderGCP        TestingProvider = "gcp"
+	TestingProviderOpenstack  TestingProvider = "openstack"
+	TestingProviderVsphere    TestingProvider = "vsphere"
+	TestingProviderAdopted    TestingProvider = "adopted"
+	TestingProviderRemote     TestingProvider = "remote"
+	TestingProviderDocker     TestingProvider = "docker"
+	TestingProviderMothership TestingProvider = "mothership"
 )
 
 type Architecture string
@@ -108,6 +109,7 @@ func initialize() {
 		TestingProviderVsphere,
 		TestingProviderAdopted,
 		TestingProviderRemote,
+		TestingProviderMothership,
 	}
 
 	Config = make(map[TestingProvider][]ProviderTestingConfig)
@@ -117,6 +119,8 @@ func initialize() {
 }
 
 func applyDefaultConfiguration() {
+	// wahab: if aws: [] was provided in config.yaml then this map will become:
+	// Config["aws"] = {defaultvalues}
 	for provider, configs := range Config {
 		if len(configs) == 0 {
 			Config[provider] = getDefaultTestingConfiguration()

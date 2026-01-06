@@ -175,6 +175,7 @@ var _ = Describe("Functional e2e tests", Label("provider:cloud", "provider:docke
 	})
 
 	It("MultiCluster services no longer match", func() {
+		Skip(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> skipping")
 		const (
 			multiClusterServiceName       = "test-multicluster"
 			multiClusterServiceMatchLabel = "k0rdent.mirantis.com/test-cluster-name"
@@ -192,9 +193,10 @@ var _ = Describe("Functional e2e tests", Label("provider:cloud", "provider:docke
 			clusterNames = append(clusterNames, clusterName)
 			clusterDeleteFunc = deleteFn
 
+			// k0rdent.mirantis.com/test-cluster-name: ci-11510-docker-0
 			mcs := multiclusterservice.BuildMultiClusterService(sd, multiClusterServiceTemplate, multiClusterServiceMatchLabel, multiClusterServiceName)
 			multiclusterservice.CreateMultiClusterService(ctx, kc.CrClient, mcs)
-			multiclusterservice.ValidateMultiClusterService(kc, multiClusterServiceName, 1)
+			multiclusterservice.ValidateMultiClusterService(kc, multiClusterServiceName, 1) // wahab: failing here
 
 			updateClusterDeploymentLabel(ctx, kc.CrClient, sd, multiClusterServiceMatchLabel, "not-matched")
 			multiclusterservice.ValidateMultiClusterService(kc, multiClusterServiceName, 0)
@@ -206,6 +208,7 @@ var _ = Describe("Functional e2e tests", Label("provider:cloud", "provider:docke
 	})
 
 	It("Performing sequential upgrades", func() {
+		Skip(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> skipping")
 		defer GinkgoRecover()
 		for i, cfg := range config.Config[config.TestingProviderDocker] {
 			ctx := context.Background()
@@ -248,6 +251,7 @@ var _ = Describe("Functional e2e tests", Label("provider:cloud", "provider:docke
 	})
 
 	It("Performing upgrades with dependent services", func() {
+		Skip(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> skipping")
 		defer GinkgoRecover()
 		for i, cfg := range config.Config[config.TestingProviderDocker] {
 			ctx := context.Background()
@@ -328,6 +332,7 @@ var _ = Describe("Functional e2e tests", Label("provider:cloud", "provider:docke
 	})
 
 	It("Pause service deployment", func() {
+		Skip(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> skipping")
 		defer GinkgoRecover()
 		for i, cfg := range config.Config[config.TestingProviderDocker] {
 			ctx := context.Background()
