@@ -117,6 +117,8 @@ func initialize() {
 }
 
 func applyDefaultConfiguration() {
+	// wahab: if aws: [] was provided in config.yaml then this map will become:
+	// Config["aws"] = {defaultvalues}
 	for provider, configs := range Config {
 		if len(configs) == 0 {
 			Config[provider] = getDefaultTestingConfiguration()
