@@ -278,6 +278,9 @@ jobs:
       GCP_REGION: us-east4
       PUBLIC_REPO: ${{ needs.authorize.outputs.public_repo == 'true' }}
     steps:
+      - uses: actions/checkout@v4
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
