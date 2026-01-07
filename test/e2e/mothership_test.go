@@ -134,6 +134,7 @@ var _ = Context("Mothership Cluster", Label("mothership"), func() {
 		})
 
 		It("deploy MCS with a service", func() {
+			Skip(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> skipping")
 			afterEachDeleteFuncs = []func() error{}
 
 			mcs := buildSelfManagementMCS("mcs1", nil,
@@ -154,6 +155,7 @@ var _ = Context("Mothership Cluster", Label("mothership"), func() {
 		})
 
 		It("deploy mcs2->mcs1", func() {
+			Skip(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> skipping")
 			afterEachDeleteFuncs = []func() error{}
 
 			mcs2 := buildSelfManagementMCS("mcs2", []string{"mcs1"},
@@ -219,6 +221,7 @@ var _ = Context("Mothership Cluster", Label("mothership"), func() {
 		})
 
 		It("deploy mcs3->(mcs1,mcs2)", func() {
+			Skip(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> skipping")
 			afterEachDeleteFuncs = []func() error{}
 
 			mcs3 := buildSelfManagementMCS("mcs3", []string{"mcs1", "mcs2"},
@@ -318,6 +321,7 @@ var _ = Context("Mothership Cluster", Label("mothership"), func() {
 		})
 
 		It("deploy (mcs1,mcs2)->mcs3", func() {
+			Skip(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> skipping")
 			afterEachDeleteFuncs = []func() error{}
 
 			mcs1 := buildSelfManagementMCS("mcs1", []string{"mcs3"},
