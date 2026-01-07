@@ -128,7 +128,8 @@ func checkMultiClusterServiceConditions(ctx context.Context, kc *kubeclient.Kube
 	for _, c := range conditions {
 		if c.Type == kcmv1.ClusterInReadyStateCondition {
 			if !strings.Contains(c.Message, fmt.Sprintf("%d/%d", expectedCount, expectedCount)) {
-				return fmt.Errorf("%s %s is not ready with conditions:\n%s", objKind, objName, validationutil.ConvertConditionsToString(c))
+				return fmt.Errorf("%s %s is not ready because expected %d/%d in message whereas actual message is '%s' for %s", objKind, objName, expectedCount, expectedCount, c.Message, c.Type)
+				// return fmt.Errorf("%s %s is not ready with conditions:\n%s", objKind, objName, validationutil.ConvertConditionsToString(c))
 			}
 		}
 	}
