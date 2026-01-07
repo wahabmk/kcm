@@ -347,6 +347,11 @@ jobs:
         run: |
           make load-e2e-config
 
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        with:
+          detached: true
+
       - name: Run E2E tests
         if: steps.provider_check.outputs.cloud_present == 'true'
         env:
