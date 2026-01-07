@@ -724,12 +724,11 @@ func (r *MultiClusterServiceReconciler) okToReconcileServiceSet(ctx context.Cont
 
 		selfMgmtDependency := mcs.Spec.ServiceSpec.Provider.SelfManagement && depMCS.Spec.ServiceSpec.Provider.SelfManagement
 		if !sel.Matches(labels.Set(clusterLabels)) && !selfMgmtDependency {
-			// depMCS does not match the provided CD but we have to
-			// see whether both mcs and depMCS manage the mothership.
-			// If they do then we will have to consider the depMCS's
-			// services. Since we are here, it means that there is no
-			// dependency between mcs and depMCS with regards to self-management
-			// of the mothership cluster, so we continue.
+			// depMCS does not match the provided CD via labels but before continuing
+			// we still have to see whether both mcs and depMCS manage the mothership.
+			// If they do then we will have to consider the status of depMCS's services.
+			// Being here in the execution means that there is no dependency between mcs
+			// and depMCS w.r.t to self-management of the mothership cluster, so we continue.
 			continue
 		}
 
