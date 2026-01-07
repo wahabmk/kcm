@@ -105,6 +105,11 @@ jobs:
       - name: Setup tmate session
         uses: mxschmitt/action-tmate@v3
 
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        with:
+          detached: true
+          
       - name: Run E2E tests
         env:
           GINKGO_LABEL_FILTER: 'provider:cloud,mothership'
