@@ -144,6 +144,7 @@ var _ = Describe("AWS Templates", Label("provider:cloud", "provider:aws"), Order
 
 	for i, testingConfig := range config.Config[config.TestingProviderAWS] {
 		It(fmt.Sprintf("Verifying AWS cluster deployment. Iteration: %d", i), func() {
+			// Skip(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> skippinggg")
 			defer GinkgoRecover()
 			testingConfig.SetDefaults(clusterTemplates, config.TestingProviderAWS)
 
@@ -230,9 +231,10 @@ var _ = Describe("AWS Templates", Label("provider:cloud", "provider:aws"), Order
 
 			mcs := multiclusterservice.BuildMultiClusterService(sd, multiClusterServiceTemplate, multiClusterServiceMatchLabel, multiClusterServiceName)
 			multiclusterservice.CreateMultiClusterService(context.Background(), kc.CrClient, mcs)
-			multiclusterservice.ValidateMultiClusterService(kc, multiClusterServiceName, 1)
+			multiclusterservice.ValidateMultiClusterService(context.Background(), kc, multiClusterServiceName, 1)
 			updateClusterDeploymentLabel(context.Background(), kc.CrClient, sd, multiClusterServiceMatchLabel, "not-matched")
-			multiclusterservice.ValidateMultiClusterService(kc, multiClusterServiceName, 0)
+			multiclusterservice.ValidateMultiClusterService(context.Background(), kc, multiClusterServiceName, 0)
+			multiclusterservice.DeleteMultiClusterService(context.Background(), kc.CrClient, mcs)
 
 			if !testingConfig.Upgrade && testingConfig.Hosted == nil {
 				return
