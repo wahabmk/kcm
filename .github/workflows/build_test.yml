@@ -343,7 +343,9 @@ jobs:
       - name: Load testing configuration
         if: ${{ steps.provider_check.outputs.cloud_present == 'true' }}
         env:
-          E2E_CONFIG_B64: ${{ needs.authorize.outputs.config }}
+          # wahab: the config we provide in Github e.g: aws: [] gets loaded into E2E_CONFIG_B64
+          E2E_CONFIG_B64: ${{ needs.authorize.outputs.config }} 
+        # wahab: then the following make commands overwrites config.yaml with it.
         run: |
           make load-e2e-config
 
