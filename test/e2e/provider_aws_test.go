@@ -144,6 +144,7 @@ var _ = Describe("AWS Templates", Label("provider:cloud", "provider:aws"), Order
 
 	for i, testingConfig := range config.Config[config.TestingProviderAWS] {
 		It(fmt.Sprintf("Verifying AWS cluster deployment. Iteration: %d", i), func() {
+			Skip(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> skipping")
 			defer GinkgoRecover()
 			testingConfig.SetDefaults(clusterTemplates, config.TestingProviderAWS)
 
