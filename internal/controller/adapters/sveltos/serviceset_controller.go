@@ -475,10 +475,10 @@ func (*ServiceSetReconciler) createOrUpdateClusterProfile(ctx context.Context, r
 
 		annotationsUpdated := handlePauseAnnotations(&profile.ObjectMeta, serviceSet)
 
-		switch {
-		// we already excluded all errors except NotFound
-		// hence if the error is not nil, it means that the object was not found
-		case err != nil:
+		if err != nil {
+			fmt.Printf("\n++++++++++++ [ServiceSetReconciler] CREATE CLUSTERPROFILE\n")
+			// we already excluded all errors except NotFound
+			// hence if the error is not nil, it means that the object was not found
 			profile.Name = serviceSet.Name
 			profile.Labels = map[string]string{
 				kcmv1.KCMManagedLabelKey: kcmv1.KCMManagedLabelValue,
@@ -488,17 +488,44 @@ func (*ServiceSetReconciler) createOrUpdateClusterProfile(ctx context.Context, r
 			if err = rgnClient.Create(ctx, profile); err != nil {
 				return fmt.Errorf("failed to create ClusterProfile for ServiceSet %s: %w", serviceSet.Name, err)
 			}
-		// If profile spec is not equal to the spec we just created so
-		// we need to update it. Make sure that the empty values in `spec`
-		// are defaulted otherwise comparison will always return false.
-		case annotationsUpdated || !equality.Semantic.DeepEqual(profile.Spec, *spec):
-			profile.OwnerReferences = []metav1.OwnerReference{*ownerReference}
-			return rgnClient.Update(ctx, profile)
+			return nil
 		}
 
-		return err
+		eq := equality.Semantic.DeepEqual(profile.Spec, *spec)
+		fmt.Printf("\n++++++++++++ [ServiceSetReconciler] UPDATE CLUSTERPROFILE annotationsUpdated=%v, eq=%v, (annotationsUpdated || !eq)=%v\n", annotationsUpdated, eq, annotationsUpdated || !eq)
+		if annotationsUpdated || !eq {
+			profile.OwnerReferences = []metav1.OwnerReference{*ownerReference}
+			errr := rgnClient.Update(ctx, profile)
+			fmt.Printf("\n++++++++++++ [ServiceSetReconciler] UPDATE CLUSTERPROFILE update err=%s\n", errr)
+			return errr
+		}
+		return nil
+		// /////////////////////////////////
+		// // switch {
+		// // // we already excluded all errors except NotFound
+		// // // hence if the error is not nil, it means that the object was not found
+		// // case err != nil:
+		// // 	profile.Name = serviceSet.Name
+		// // 	profile.Labels = map[string]string{
+		// // 		kcmv1.KCMManagedLabelKey: kcmv1.KCMManagedLabelValue,
+		// // 	}
+		// // 	profile.OwnerReferences = []metav1.OwnerReference{*ownerReference}
+		// // 	profile.Spec = *spec
+		// // 	if err = rgnClient.Create(ctx, profile); err != nil {
+		// // 		return fmt.Errorf("failed to create ClusterProfile for ServiceSet %s: %w", serviceSet.Name, err)
+		// // 	}
+		// // 	// If profile spec is not equal to the spec we just created so
+		// // 	// we need to update it. Make sure that the empty values in `spec`
+		// // 	// are defaulted otherwise comparison will always return false.
+		// // case annotationsUpdated || !equality.Semantic.DeepEqual(profile.Spec, *spec):
+		// // 	profile.OwnerReferences = []metav1.OwnerReference{*ownerReference}
+		// // 	return rgnClient.Update(ctx, profile)
+		// // }
+
+		// return err
 	})
 
+	fmt.Printf("\n++++++++++++ [ServiceSetReconciler] retryErr=%v\n", retryErr)
 	if retryErr != nil {
 		return fmt.Errorf("failed to update ClusterProfile for ServiceSet %s: %w", serviceSet.Name, retryErr)
 	}
