@@ -418,17 +418,71 @@ func ServicesToDeploy(
 	for _, svc := range serviceSet.Spec.Services {
 		key := client.ObjectKey{Namespace: effectiveNamespace(svc.Namespace), Name: svc.Name}
 		desiredVersion := desiredServiceVersions[key]
+
+		b, _ := json.MarshalIndent(upgradePaths, "", "  ")
+		fmt.Printf("\n[1] ***************** [svc.Name=%s] desiredVersion = %s, svc.Version = %s\n", svc.Name, desiredVersion, *svc.Version)
+		fmt.Printf("\n[2] ***************** [svc.Name=%s] svc.Version != nil && desiredVersion < *svc.Version = %v\n", svc.Name, svc.Version != nil && desiredVersion < *svc.Version)
+		fmt.Printf("\n[3] ***************** [svc.Name=%s] desiredVersionInUpgradePaths(upgradePaths, svc, desiredVersion) = %v\n", svc.Name, desiredVersionInUpgradePaths(upgradePaths, svc, desiredVersion))
+		fmt.Printf("\n[4] ***************** [svc.Name=%s] upgradePaths = %s\n", svc.Name, string(b))
+
 		// check upgrade availability
+
+		// wahab: The upgradePaths are in ingress-nginx-4-11-3 format
+		// whereas the desiredVersion is in 4.11.3 format so this function
+		// desiredVersionInUpgradePaths is fundamentally broken
+
+		// wahab: And the comparison `desiredVersion < *svc.Version` is a
+		// simple string comparison and not a semver comparison, so it evaluates
+		// to true if desiredVersion is empty (because in a string comparison
+		// "" < "4.11.3" evaluates to True) which makes no sense.
+		//
+		// wahab: Speaking of making no sense, it doesn't make sense to me
+		// as to why desiredVersion < svc.Version would mean there is an upgrade available?
 		upgradeAvailable[key] = svc.Version != nil && desiredVersion < *svc.Version ||
 			desiredVersionInUpgradePaths(upgradePaths, svc, desiredVersion)
+
+		hasFailed := false
 		for _, serviceState := range serviceSet.Status.Services {
-			if serviceState.State == kcmv1.ServiceStateDeployed &&
-				serviceState.Namespace == svc.Namespace && serviceState.Name == svc.Name && serviceState.Version != nil {
-				deployedServiceVersions[key] = *serviceState.Version
+			if serviceState.Namespace == svc.Namespace && serviceState.Name == svc.Name {
+				ver := ""
+				if serviceState.Version != nil {
+					ver = *serviceState.Version
+				}
+				if serviceState.State == kcmv1.ServiceStateDeployed {
+					deployedServiceVersions[key] = ver
+				}
+				if serviceState.State == kcmv1.ServiceStateFailed {
+					hasFailed = true
+				}
 			}
+			// // if serviceState.State == kcmv1.ServiceStateDeployed &&
+			// // 	serviceState.Namespace == svc.Namespace && serviceState.Name == svc.Name && serviceState.Version != nil {
+			// // 	// wahab(A): I think here in lies the problem. Only services that are Deployed
+			// // 	// are added to this map. This map is used later to remove svc's entry (svc coming from current ServiceSet)
+			// // 	// from desiredServices if it does not have Deployed status.
+			// // 	deployedServiceVersions[key] = *serviceState.Version
+			// // }
 		}
 
+		fmt.Printf("\n[5] ***************** [svc.Name=%s] deployedServiceVersions = %s\n", svc.Name, deployedServiceVersions)
+		fmt.Printf("\n[6] ***************** [svc.Name=%s] BEFORE len(desiredServices) = %d:\n", svc.Name, len(desiredServices))
+		for i, ss := range desiredServices {
+			fmt.Printf("\t%d) name=%s, version=%s, values=%s\n", i, ss.Name, ss.Version, ss.Values)
+		}
+
+		if hasFailed {
+			fmt.Printf("\n[66] ***************** [svc.Name=%s] hasFailed so continue:\n", svc.Name)
+			continue
+		}
 		if svc.Version != nil && *svc.Version != deployedServiceVersions[key] {
+			// wahab(B): Since the svc wasn't added to deployed services this block runs
+			// for svc and it adds the existing svc's spec (from ServiceSet) to services
+			// and NOT the desired spec for the svc, and then it deletes the entry for
+			// svc from desiredServices completely.
+			//
+			// If the svc has a Failed status in the ServiceSet and the user removes
+			// it from the MCS's spec, this block will still run and append the
+			// failing svc to the list of services to be deployed again.
 			services = append(services, svc)
 
 			for i := 0; i < len(desiredServices); {
@@ -439,8 +493,18 @@ func ServicesToDeploy(
 				}
 			}
 		}
+		fmt.Printf("\n[7] ***************** [svc.Name=%s] AFTER len(desiredServices) = %d:\n", svc.Name, len(desiredServices))
+		for i, ss := range desiredServices {
+			fmt.Printf("\t%d) name=%s, version=%s, values=%s\n", i, ss.Name, ss.Version, ss.Values)
+		}
 	}
 
+	// wahab(C): Since the svc no longer exists in desiredServices.
+	// this whole block doesn't even run for the svc.
+	// From what I can gather this whole dance is to avoid upgrading
+	// services that are currently in Progress. So he checks for status to
+	// be Deployed in step A.
+	//
 	// Process desired services
 	for _, s := range desiredServices {
 		key := client.ObjectKey{Namespace: effectiveNamespace(s.Namespace), Name: s.Name}
@@ -458,6 +522,7 @@ func ServicesToDeploy(
 			if idx >= 0 {
 				services = append(services, makeService(s, s.Version, s.Template))
 			}
+			fmt.Printf("\n[8] **************** [s.Name=%s] = Continue here\n", s.Name)
 			continue
 		}
 
@@ -471,6 +536,7 @@ func ServicesToDeploy(
 		// process upgrade paths (assume ordered lowest → highest)
 		currentVersion := deployedServiceVersions[key]
 		minimumUpgrade := kcmv1.AvailableUpgrade{}
+		fmt.Printf("\n[9] **************** [s.Name=%s] = currentVersion = %s\n", s.Name, currentVersion)
 
 		for _, path := range upgradePaths {
 			if path.Name != s.Name {
@@ -504,6 +570,7 @@ func ServicesToDeploy(
 			}
 		}
 
+		fmt.Printf("\n[10] ***************** [s.Name=%s] minimumUpgrade.Version = %s\n", s.Name, minimumUpgrade.Version)
 		services = appendIfNotPresent(services, s, minimumUpgrade)
 	}
 
@@ -567,6 +634,7 @@ func GetServiceSetWithOperation(
 		return nil, kcmv1.ServiceSetOperationNone, fmt.Errorf("failed to get ServiceSet %s: %w", operationReq.ObjectKey, err)
 	}
 
+	// wahab: the issue is probably here.
 	update, err := needsUpdate(serviceSet, operationReq.ProviderSpec, operationReq.Services)
 	if err != nil {
 		return nil, "", err
@@ -632,6 +700,18 @@ func needsUpdate(
 		}
 	}
 
+	fmt.Printf("\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> desiredServicesMap = %v\n", len(desiredServicesMap))
+	for k, v := range desiredServicesMap {
+		b, _ := json.MarshalIndent(v, "", "  ")
+		fmt.Printf("key = %s, value = %s\n", k, string(b))
+	}
+	fmt.Printf("------------------------------------\n")
+	fmt.Printf("\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> servicesMap = = %v\n", len(servicesMap))
+	for k, v := range servicesMap {
+		b, _ := json.MarshalIndent(v, "", "  ")
+		fmt.Printf("key = %s, value = %s\n", k, string(b))
+	}
+	fmt.Printf("------------------------------------\n")
 	// difference between services defined in ClusterDeployment and ServiceSet means that ServiceSet needs to be updated.
 	return !equality.Semantic.DeepEqual(desiredServicesMap, servicesMap), nil
 }
