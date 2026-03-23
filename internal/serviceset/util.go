@@ -211,14 +211,15 @@ func ServicesUpgradePaths(
 // It does so by fetching all ServiceSets associated with provided
 // cd & mcs from cd's namespace or from system namespace if cd is nil.
 //
-// NOTE: This function works under the assumption that the spec
+// NOTE:
+// This function works under the assumption that the spec
 // is correct. Meaning that it would accept A<-B as correct even
 // if A is not defined in the spec as a separate service.
 //
-// NOTE: This function works under the assumption that there will
+// This function works under the assumption that there will
 // always be just 1 ServiceSet for every unique combination of CD & MCS.
 //
-// NOTE: This function depends solely on the ServiceSet to fetch the latest
+// This function depends solely on the ServiceSet to fetch the latest
 // state of the services. Therefore, it works under the assumption that some
 // other mechanism like the poller for the Sveltos adapter will update the
 // ServiceSet by fetching the latest state from the specific state manager's objects.
@@ -235,6 +236,10 @@ func FilterServiceDependencies(
 		mcsName = mcs.GetName()
 	}
 
+	// wahab: There is also another implicit assumption in this function,
+	// which is that there is never be a scenario in which mcs != nil but cd == nil.
+	// Meaning that this function isn't designed to handle services across clusters.
+	// I should return an error in this case so that this assumption becomes explicit.
 	cdName := ""
 	namespace := systemNamespace
 	if cd != nil {
@@ -267,8 +272,8 @@ func FilterServiceDependencies(
 	// We can rely on the state of the services reported in the ServiceSet because:
 	//
 	// 1. We have configured a poller in the Sveltos ServiceSet controller which
-	// polls the Sveltos ClusterSummary and triggers the ServiceSet Controller if
-	// there is a change in the state of the services.
+	// polls the associated Sveltos ClusterSummary for each of the ServiceSets and
+	// triggers the ServiceSet Controller if there is a change in the state of the services.
 	//
 	// 2. The ServiceSet Controller then captures the latest state of the services
 	// from the ClusterSummary and updates the status of the relevant ServiceSet.
@@ -294,12 +299,27 @@ func FilterServiceDependencies(
 	if err := c.List(ctx, serviceSets, client.InNamespace(namespace), client.MatchingFieldsSelector{Selector: sel}); err != nil {
 		return nil, fmt.Errorf("failed to list ServiceSets: %w", err)
 	}
+	// wahab: Let's say we have MCS matching CD. So there are 2 servicesets:
+	// 1. ServiceSet with just CD label.
+	// 2. ServiceSet with both MCS & CD labels.
+	// The AND operation above will only fetch the 1st ServiceSet no?
+	// So this means that this function will only ever operate on 1 serviceset at a time.
+	// Should we change the logic so that if MCS and CD both are not nil,
+	// then 2 servicesets are fetched because after all both operate on the same cluster,
+	// so we are interested in the services in both of them.
+	// But I guess everything works out because in one reconciliation cycle one
+	// of the servicesets is reconciled and the other serviceset in another cycle,
+	// and there's also the poller running in the background which updates the status
+	// of each serviceset periodically ensuring that it will be reconciled.
+	// Still, better to make this explicit by fetching just 1 serviceset or only
+	// focusing of serviceSets[0].
 
 	// Map of services from the spec of fetched ServiceSets.
 	servicesFromSpec := make(map[client.ObjectKey]struct{})
 	// Map of services (with their states) from the status of fetched ServiceSets.
 	servicesFromStatus := make(map[client.ObjectKey]string)
-	for _, sset := range serviceSets.Items {
+	for i, sset := range serviceSets.Items {
+		fmt.Printf("\n>>>>>>>>>>>>> %d) ServiceSet = %s\n", i, sset.GetName())
 		for _, svc := range sset.Spec.Services {
 			servicesFromSpec[ServiceKey(svc.Namespace, svc.Name)] = struct{}{}
 		}
@@ -357,6 +377,7 @@ func FilterServiceDependencies(
 		return cmp.Compare(a.Name, b.Name)
 	})
 
+	fmt.Printf("\n############# Filtered = %v\n", filtered)
 	return filtered, nil
 }
 
