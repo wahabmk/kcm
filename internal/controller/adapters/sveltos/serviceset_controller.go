@@ -831,12 +831,16 @@ func getHelmCharts(ctx context.Context, c client.Client, serviceSet *kcmv1.Servi
 		}) {
 			serviceStatus := kcmv1.ServiceState{
 				LastStateTransitionTime: new(metav1.Now()),
-				Type:                    kcmv1.ServiceTypeHelm,
-				Name:                    svc.Name,
-				Namespace:               svc.Namespace,
-				Template:                svc.Template,
-				Version:                 svc.Version,
-				State:                   kcmv1.ServiceStateProvisioning,
+				// wahab: why are we hardcoding helm type here?
+				// so apparently this is the case where a new svc is added to the spec
+				// so its status won't exist in the status hence we add its status with
+				// default values, which is why the state is also set to provisioning.
+				Type:      kcmv1.ServiceTypeHelm,
+				Name:      svc.Name,
+				Namespace: svc.Namespace,
+				Template:  svc.Template,
+				Version:   svc.Version,
+				State:     kcmv1.ServiceStateProvisioning,
 			}
 			serviceSet.Status.Services = append(serviceSet.Status.Services, serviceStatus)
 		}
@@ -1594,6 +1598,8 @@ func servicesStateFromSummary(
 		if !ok {
 			continue
 		}
+
+		// wahab: the s.Type is set to helm by default which is why it will always be helm
 		newState.Type = s.Type
 		newState.LastStateTransitionTime = s.LastStateTransitionTime
 

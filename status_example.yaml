@@ -1,0 +1,41 @@
+status:
+  dependencies: no dependencies
+  featureSummaries:
+  - consecutiveFailures: 356
+    failureMessage: |
+      chart: ingress-nginx, release: nginx, context deadline exceeded
+    featureID: Helm
+    hash: lrkfLUdZUO1Ttr4h/DqOey2HrTAGMh5wvlbTNDZKXzg=
+    lastAppliedTime: "2026-04-08T20:13:39Z"
+    status: Failed
+  helmReleaseSummaries:
+  - failureMessage: context deadline exceeded
+    releaseName: nginx
+    releaseNamespace: nginx
+    status: Managing
+    valuesHash: yj0WO6sFU4GCciYUBWjzvvfqrBh869doeOC2Pp5EI1Y=
+  - releaseName: postgres-operator
+    releaseNamespace: postgres-operator
+    status: Managing
+    valuesHash: yj0WO6sFU4GCciYUBWjzvvfqrBh869doeOC2Pp5EI1Y=
+  nextReconcileTime: "2026-04-08T20:13:59Z"
+---
+status:
+  dependencies: no dependencies
+  featureSummaries:
+  - failureMessage: |
+      chart: ingress-nginx, release: nginx, context deadline exceeded
+    featureID: Helm
+    hash: lrkfLUdZUO1Ttr4h/DqOey2HrTAGMh5wvlbTNDZKXzg=
+    lastAppliedTime: "2026-04-08T21:02:51Z"
+    status: Provisioning
+  helmReleaseSummaries:
+  - conflictMessage: ClusterSummary management-3556efa5-sveltos-mgmt managing it
+    releaseName: nginx
+    releaseNamespace: nginx
+    status: Conflict
+  - releaseName: postgres-operator
+    releaseNamespace: postgres-operator
+    status: Managing
+    valuesHash: yj0WO6sFU4GCciYUBWjzvvfqrBh869doeOC2Pp5EI1Y=
+  nextReconcileTime: "2026-04-08T21:03:51Z"
