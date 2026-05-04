@@ -23,6 +23,7 @@ import (
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -229,7 +230,11 @@ type ServiceTemplateList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&ServiceTemplate{}, &ServiceTemplateList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &ServiceTemplate{}, &ServiceTemplateList{})
+		metav1.AddToGroupVersion(s, GroupVersion)
+		return nil
+	})
 }
 
 // HelmChartSpec returns the ChartSpec of the ServiceTemplate if defined,

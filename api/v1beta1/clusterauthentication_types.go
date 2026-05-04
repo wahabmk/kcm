@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/apis/apiserver"
 	apiserverv1 "k8s.io/apiserver/pkg/apis/apiserver/v1"
 )
@@ -112,5 +113,9 @@ type ClusterAuthenticationList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&ClusterAuthentication{}, &ClusterAuthenticationList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &ClusterAuthentication{}, &ClusterAuthenticationList{})
+		metav1.AddToGroupVersion(s, GroupVersion)
+		return nil
+	})
 }

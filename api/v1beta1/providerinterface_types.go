@@ -16,6 +16,7 @@ package v1beta1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 const (
@@ -102,5 +103,9 @@ type ProviderInterfaceList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&ProviderInterface{}, &ProviderInterfaceList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &ProviderInterface{}, &ProviderInterfaceList{})
+		metav1.AddToGroupVersion(s, GroupVersion)
+		return nil
+	})
 }

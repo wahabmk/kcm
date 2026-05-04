@@ -18,6 +18,7 @@ import (
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // ProviderTemplateKind denotes the providertemplate resource Kind.
@@ -97,5 +98,9 @@ type ProviderTemplateList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&ProviderTemplate{}, &ProviderTemplateList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &ProviderTemplate{}, &ProviderTemplateList{})
+		metav1.AddToGroupVersion(s, GroupVersion)
+		return nil
+	})
 }

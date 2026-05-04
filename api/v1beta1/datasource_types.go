@@ -16,6 +16,7 @@ package v1beta1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 const DataSourceKind = "DataSource"
@@ -89,5 +90,9 @@ type DataSourceList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&DataSource{}, &DataSourceList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &DataSource{}, &DataSourceList{})
+		metav1.AddToGroupVersion(s, GroupVersion)
+		return nil
+	})
 }

@@ -16,6 +16,7 @@ package v1beta1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 const ClusterDataSourceFinalizer = "k0rdent.mirantis.com/cluster-data-source"
@@ -76,5 +77,9 @@ type ClusterDataSourceList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&ClusterDataSource{}, &ClusterDataSourceList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &ClusterDataSource{}, &ClusterDataSourceList{})
+		metav1.AddToGroupVersion(s, GroupVersion)
+		return nil
+	})
 }

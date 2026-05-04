@@ -22,6 +22,7 @@ import (
 
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
@@ -275,5 +276,9 @@ type ClusterDeploymentList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&ClusterDeployment{}, &ClusterDeploymentList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &ClusterDeployment{}, &ClusterDeploymentList{})
+		metav1.AddToGroupVersion(s, GroupVersion)
+		return nil
+	})
 }

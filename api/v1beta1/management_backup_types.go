@@ -19,6 +19,7 @@ import (
 
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 const (
@@ -124,5 +125,9 @@ type ManagementBackupList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&ManagementBackup{}, &ManagementBackupList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &ManagementBackup{}, &ManagementBackupList{})
+		metav1.AddToGroupVersion(s, GroupVersion)
+		return nil
+	})
 }

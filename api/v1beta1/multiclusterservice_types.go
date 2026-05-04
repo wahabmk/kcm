@@ -19,6 +19,7 @@ import (
 	libsveltosv1beta1 "github.com/projectsveltos/libsveltos/api/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 const (
@@ -424,5 +425,9 @@ type MultiClusterServiceList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&MultiClusterService{}, &MultiClusterServiceList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &MultiClusterService{}, &MultiClusterServiceList{})
+		metav1.AddToGroupVersion(s, GroupVersion)
+		return nil
+	})
 }

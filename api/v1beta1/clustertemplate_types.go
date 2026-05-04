@@ -19,6 +19,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 const (
@@ -137,5 +138,9 @@ type ClusterTemplateList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&ClusterTemplate{}, &ClusterTemplateList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &ClusterTemplate{}, &ClusterTemplateList{})
+		metav1.AddToGroupVersion(s, GroupVersion)
+		return nil
+	})
 }
