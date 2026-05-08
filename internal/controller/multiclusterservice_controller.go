@@ -15,9 +15,11 @@
 package controller
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -171,13 +173,13 @@ func (r *MultiClusterServiceReconciler) reconcileUpdate(ctx context.Context, mcs
 	// any clusterDeployment, but also has selfManagement flag set to true.
 	if mcs.Spec.ServiceSpec.Provider.SelfManagement {
 		l.V(1).Info("Ensuring ServiceSet for the management cluster")
-		errs = errors.Join(r.createOrUpdateServiceSet(ctx, mcs, nil))
+		errs = r.createOrUpdateServiceSet(ctx, mcs, nil)
 	}
 
 	clusters := new(kcmv1.ClusterDeploymentList)
 	if !selector.Empty() {
 		if err := r.Client.List(ctx, clusters, client.MatchingLabelsSelector{Selector: selector}); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to list ClusterDeployments: %w", err)
+			return ctrl.Result{}, errors.Join(errs, fmt.Errorf("failed to list ClusterDeployments: %w", err))
 		}
 	}
 
@@ -189,9 +191,15 @@ func (r *MultiClusterServiceReconciler) reconcileUpdate(ctx context.Context, mcs
 		errs = errors.Join(errs, r.createOrUpdateServiceSet(ctx, mcs, &cluster))
 	}
 
-	errs = errors.Join(errs, r.setClustersCondition(ctx, mcs))
+	serviceSetList := new(kcmv1.ServiceSetList)
+	if err := r.Client.List(ctx, serviceSetList, client.MatchingFields{kcmv1.ServiceSetMultiClusterServiceIndexKey: mcs.Name}); err != nil {
+		return ctrl.Result{}, errors.Join(errs, fmt.Errorf("failed to list ServiceSets for MultiClusterService %s: %w", mcs.Name, err))
+	}
+	l.V(1).Info("ServiceSets matching MCS found", "MCS", mcs.Name, "count", len(serviceSetList.Items))
+
+	setClustersCondition(ctx, mcs, serviceSetList.Items)
 	if errs != nil {
-		return result, errs
+		return ctrl.Result{}, errs
 	}
 
 	var (
@@ -201,21 +209,16 @@ func (r *MultiClusterServiceReconciler) reconcileUpdate(ctx context.Context, mcs
 	upgradePaths, servicesErr = serviceset.ServicesUpgradePaths(ctx, r.Client, mcs.Spec.ServiceSpec.Services, r.SystemNamespace)
 	mcs.Status.ServicesUpgradePaths = upgradePaths
 
-	clustersErr := r.setMatchingClusters(ctx, mcs)
+	clustersErr := r.setMatchingClusters(ctx, mcs, serviceSetList.Items)
 
 	return result, errors.Join(servicesErr, clustersErr)
 }
 
 // setClustersCondition updates MultiClusterService's condition which shows number of clusters where services were
 // successfully deployed out of total number of matching clusters.
-func (r *MultiClusterServiceReconciler) setClustersCondition(ctx context.Context, mcs *kcmv1.MultiClusterService) error {
+func setClustersCondition(ctx context.Context, mcs *kcmv1.MultiClusterService, serviceSets []kcmv1.ServiceSet) {
 	l := ctrl.LoggerFrom(ctx)
 	l.V(1).Info("Reconciling MultiClusterService conditions")
-
-	serviceSetList := new(kcmv1.ServiceSetList)
-	if err := r.Client.List(ctx, serviceSetList, client.MatchingFields{kcmv1.ServiceSetMultiClusterServiceIndexKey: mcs.Name}); err != nil {
-		return fmt.Errorf("failed to list ServiceSets for MultiClusterService %s: %w", client.ObjectKeyFromObject(mcs), err)
-	}
 
 	var totalDeployments, readyDeployments int
 
@@ -225,7 +228,7 @@ func (r *MultiClusterServiceReconciler) setClustersCondition(ctx context.Context
 		Reason: kcmv1.SucceededReason,
 	}
 
-	for _, serviceSet := range serviceSetList.Items {
+	for _, serviceSet := range serviceSets {
 		// We won't count serviceSets being deleted neither in total deployments count
 		// nor in successful deployments count. If the serviceSet is being deleted, this
 		// means that either corresponding cluster is being deleted or corresponding cluster
@@ -248,25 +251,18 @@ func (r *MultiClusterServiceReconciler) setClustersCondition(ctx context.Context
 
 	c.Message = fmt.Sprintf("%d/%d", readyDeployments, totalDeployments)
 	apimeta.SetStatusCondition(&mcs.Status.Conditions, c)
-	return nil
 }
 
 // setMatchingClusters collects service deployments status on matching clusters from ServiceSet objects and
 // updates MultiClusterService object's status.
-func (r *MultiClusterServiceReconciler) setMatchingClusters(ctx context.Context, mcs *kcmv1.MultiClusterService) error {
+func (r *MultiClusterServiceReconciler) setMatchingClusters(ctx context.Context, mcs *kcmv1.MultiClusterService, serviceSets []kcmv1.ServiceSet) error {
 	l := ctrl.LoggerFrom(ctx)
 	l.V(1).Info("Reconciling MultiClusterService matching clusters")
-
-	serviceSetList := new(kcmv1.ServiceSetList)
-	if err := r.Client.List(ctx, serviceSetList, client.MatchingFields{kcmv1.ServiceSetMultiClusterServiceIndexKey: mcs.Name}); err != nil {
-		return fmt.Errorf("failed to list ServiceSets for MultiClusterService %s: %w", client.ObjectKeyFromObject(mcs), err)
-	}
-
 	now := metav1.NewTime(r.timeFunc())
-	matchingClusters := make([]kcmv1.MatchingCluster, 0, len(serviceSetList.Items))
+	matchingClusters := make([]kcmv1.MatchingCluster, 0, len(serviceSets))
 
 	var errs error
-	for _, serviceSet := range serviceSetList.Items {
+	for _, serviceSet := range serviceSets {
 		// we'll skip service sets being deleted
 		if !serviceSet.DeletionTimestamp.IsZero() {
 			continue
@@ -321,7 +317,20 @@ func (r *MultiClusterServiceReconciler) setMatchingClusters(ctx context.Context,
 		}
 		resultingClusters = append(resultingClusters, observedCluster)
 	}
+
+	// We need to sort the slice of matching clusters in order to avoid any
+	// unnecessary reconciles when the status is compared in the `updateStatus` func.
+	slices.SortFunc(resultingClusters, func(a, b kcmv1.MatchingCluster) int {
+		if n := cmp.Compare(a.Kind, b.Kind); n != 0 {
+			return n
+		}
+		if n := cmp.Compare(a.Namespace, b.Namespace); n != 0 {
+			return n
+		}
+		return cmp.Compare(a.Name, b.Name)
+	})
 	mcs.Status.MatchingClusters = resultingClusters
+
 	return errs
 }
 
