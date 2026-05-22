@@ -730,9 +730,9 @@ func (r *ServiceSetReconciler) updateServicesInReadyStateCondition(serviceSet *k
 	}
 	totalCount := len(serviceSet.Spec.Services)
 	svcReadyCond := findCondition(serviceSet, kcmv1.ServicesInReadyStateCondition)
-	svcReadyStatus := metav1.ConditionFalse
-	if totalCount > 0 && deployedCount == totalCount {
-		svcReadyStatus = metav1.ConditionTrue
+	svcReadyStatus := metav1.ConditionTrue
+	if deployedCount != totalCount {
+		svcReadyStatus = metav1.ConditionFalse
 	}
 	updateCondition(serviceSet, svcReadyCond, svcReadyStatus, kcmv1.ServicesInReadyStateCondition,
 		fmt.Sprintf("%d/%d", deployedCount, totalCount), r.timeFunc())
