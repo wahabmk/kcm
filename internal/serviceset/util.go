@@ -230,20 +230,22 @@ func ServicesUpgradePaths(
 // dependents stay locked at their stored versions, ensuring upgrades propagate
 // down the dependency chain in the declared order rather than all at once.
 //
-// NOTE: Every service referenced in a DependsOn field must also appear in
+// CONDITIONS:
+// This function depends on the following conditions to work correctly.
+//
+// 1. Every service referenced in a DependsOn field must also appear in
 // the desired services list; referencing an absent service is an error.
 //
-// NOTE: desiredServices is expected to have its Versions already resolved by
+// 2. desiredServices is expected to have its Versions already resolved by
 // the caller (e.g. via ResolveServiceVersions) so the version-aware gate can
 // compare against the resolved form that previous reconciles persisted in
 // ServiceSet.Spec. Passing unresolved services is tolerated — comparison
 // falls back to Template — but mixing resolved Spec versions with unresolved
 // desired versions will lock dependents.
 //
-// NOTE: This function works under the assumption that there will
-// always be just 1 ServiceSet for every unique combination of CD & MCS.
+// 3. There will always be just 1 ServiceSet for every unique combination of CD & MCS.
 //
-// NOTE: This function depends solely on the ServiceSet to fetch the latest
+// 4. This function depends solely on the ServiceSet to fetch the latest
 // state of the services. Therefore, it works under the assumption that some
 // other mechanism like the poller for the Sveltos adapter will update the
 // ServiceSet by fetching the latest state from the specific state manager's objects.
@@ -301,6 +303,19 @@ func FilterServiceDependencies(
 		}
 	}
 
+	// desiredServices is expected to have Versions resolved by the caller
+	// (see ResolveServicesToApply). For each service, prefer Version; fall back
+	// to Template — same normalisation used above for spec/status — so the
+	// gate comparisons are like-for-like.
+	desiredVersion := make(map[client.ObjectKey]string, len(desiredServices))
+	for _, svc := range desiredServices {
+		v := svc.Version
+		if v == "" {
+			v = svc.Template
+		}
+		desiredVersion[ServiceKey(svc.Namespace, svc.Name)] = v
+	}
+
 	// Fetch serviceSet.
 	// We can rely on the state of the services reported in the ServiceSet because:
 	//
@@ -333,59 +348,7 @@ func FilterServiceDependencies(
 		return nil, fmt.Errorf("failed to list ServiceSets: %w", err)
 	}
 
-	// Build version maps from the existing ServiceSet(s) so we can compare each
-	// service's currently-promised spec step against what the cluster actually
-	// runs and against the user's final desired version. Spec and status entries
-	// are normalised the same way so the comparison is symmetric: prefer Version,
-	// fall back to Template when Version is nil/empty.
-	//
-	// NOTE: When more than one ServiceSet matches (cd-only call with multiple
-	// MCS targeting the same cluster, or analogous), values overwrite on key
-	// collision. Current reconciler wiring guarantees at most one relevant
-	// ServiceSet per call (the MCS reconciler scopes by both cluster and MCS;
-	// the CD reconciler operates on the CD's own spec/ServiceSet only), so the
-	// overwrite is not observable in practice. Revisit if that wiring changes.
-	specVersion := make(map[client.ObjectKey]string)
-	statusVersion := make(map[client.ObjectKey]string)
-	statusState := make(map[client.ObjectKey]string)
-	for _, sset := range serviceSets.Items {
-		for _, svc := range sset.Spec.Services {
-			v := ""
-			if svc.Version != nil {
-				v = *svc.Version
-			}
-			if v == "" {
-				v = svc.Template
-			}
-			specVersion[ServiceKey(svc.Namespace, svc.Name)] = v
-		}
-		for _, svc := range sset.Status.Services {
-			v := ""
-			if svc.Version != nil {
-				v = *svc.Version
-			}
-			if v == "" {
-				v = svc.Template
-			}
-			k := ServiceKey(svc.Namespace, svc.Name)
-			statusVersion[k] = v
-			statusState[k] = svc.State
-		}
-	}
-
-	// desiredServices is expected to have Versions resolved by the caller
-	// (see ResolveServicesToApply). For each service, prefer Version; fall back
-	// to Template — same normalisation used above for spec/status — so the
-	// gate comparisons are like-for-like.
-	desiredVersion := make(map[client.ObjectKey]string, len(desiredServices))
-	for _, svc := range desiredServices {
-		v := svc.Version
-		if v == "" {
-			v = svc.Template
-		}
-		desiredVersion[ServiceKey(svc.Namespace, svc.Name)] = v
-	}
-
+	svcVersionStates := buildServiceVersionStates(serviceSets.Items)
 	// A service counts as "deployed" for the purpose of unlocking its dependents
 	// only when all three hold:
 	//   1. its status is Deployed (the current step actually runs on the cluster),
@@ -396,15 +359,22 @@ func FilterServiceDependencies(
 	// just bumped the desired version stops satisfying its dependents until the
 	// new version is both written into Spec and observed in Status.
 	for k := range serviceIdx {
-		if statusState[k] != kcmv1.ServiceStateDeployed {
+		idx := slices.IndexFunc(svcVersionStates[k], func(n serviceVersionState) bool {
+			return desiredVersion[k] == n.specVersion
+		})
+		if idx < 0 {
+			// Meaning desiredVersion != specVersion
 			continue
 		}
-		if statusVersion[k] != specVersion[k] {
+		if svcVersionStates[k][idx].specVersion != svcVersionStates[k][idx].statusVersion {
 			continue
 		}
-		if specVersion[k] != desiredVersion[k] {
+		if svcVersionStates[k][idx].state != kcmv1.ServiceStateDeployed {
 			continue
 		}
+		// The reason we do not account for key collisions in
+		// deployedServices is because it is dervied from desiredServices
+		// in which service name/namespace is guaranteed to be unique.
 		deployedServices[k] = struct{}{}
 	}
 
@@ -441,6 +411,73 @@ func FilterServiceDependencies(
 	})
 
 	return filtered, nil
+}
+
+type serviceVersionState struct {
+	specVersion   string
+	statusVersion string
+	state         string
+}
+
+// buildServiceVersionStates builds service version-state maps from the existing ServiceSet(s)
+// so we can compare each service's currently-promised spec step against what the cluster actually
+// runs and against the user's final desired version. Spec and status entries
+// are normalised the same way so the comparison is symmetric: prefer Version,
+// fall back to Template when Version is nil/empty.
+func buildServiceVersionStates(serviceSets []kcmv1.ServiceSet) map[client.ObjectKey][]serviceVersionState {
+	svcVersionStates := make(map[client.ObjectKey][]serviceVersionState)
+
+	for _, sset := range serviceSets {
+		m := make(map[client.ObjectKey]*serviceVersionState)
+
+		for _, svc := range sset.Spec.Services {
+			v := ""
+			if svc.Version != nil {
+				v = *svc.Version
+			}
+			if v == "" {
+				v = svc.Template
+			}
+
+			k := ServiceKey(svc.Namespace, svc.Name)
+			if _, ok := m[k]; !ok {
+				m[k] = &serviceVersionState{specVersion: v}
+			} else {
+				m[k].specVersion = v
+			}
+		}
+		for _, svc := range sset.Status.Services {
+			v := ""
+			if svc.Version != nil {
+				v = *svc.Version
+			}
+			if v == "" {
+				v = svc.Template
+			}
+
+			k := ServiceKey(svc.Namespace, svc.Name)
+
+			if _, ok := m[k]; !ok {
+				m[k] = &serviceVersionState{statusVersion: v}
+			} else {
+				m[k].statusVersion = v
+			}
+
+			if _, ok := m[k]; !ok {
+				m[k] = &serviceVersionState{state: svc.State}
+			} else {
+				m[k].state = svc.State
+			}
+		}
+
+		for k, v := range m {
+			if v != nil {
+				svcVersionStates[k] = append(svcVersionStates[k], *v)
+			}
+		}
+	}
+
+	return svcVersionStates
 }
 
 func makeService(s kcmv1.Service, version, template string) kcmv1.ServiceWithValues {
