@@ -1770,3 +1770,95 @@ func Test_FilterServiceDependencies_UpgradeOrdering(t *testing.T) {
 		})
 	}
 }
+
+// Test_FilterServiceDependencies_MCSKeyCollision reproduces the bug described in
+// https://github.com/k0rdent/kcm/issues/2827:
+//
+// When a CD has services with dependencies (e.g. external-secrets -> nginx), and an
+// MCS also targets the same cluster deploying the same service name (nginx) at a
+// lower-priority version that fails, the CD reconciler fetched both ServiceSets.
+// Because both ServiceSets use the same map key (namespace/name), the MCS entry
+// could overwrite the CD's entry, making nginx appear as Failed even though the
+// CD's nginx was Deployed. This prevented external-secrets from ever being unlocked.
+//
+// The fix: when reconciling a CD (mcsName == ""), skip MCS-linked ServiceSets
+// (Spec.MultiClusterService != "") when building the version/state maps.
+func Test_FilterServiceDependencies_MCSKeyCollision(t *testing.T) {
+	t.Parallel()
+
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kcmv1.AddToScheme(scheme))
+
+	cd := &kcmv1.ClusterDeployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "wali-dev-1", Namespace: "kcm-system"},
+	}
+
+	nginxVersion := "4.14.3"
+	esVersion := "2.0.0"
+	mcsNginxVersion := "4.13.0"
+
+	// CD's desired services: nginx (no deps) + external-secrets (depends on nginx).
+	desired := []kcmv1.Service{
+		{Namespace: "nginx", Name: "nginx", Template: "ingress-nginx-4-14-3", Version: nginxVersion},
+		{
+			Namespace: "external-secrets", Name: "external-secrets",
+			Template: "external-secrets-2-0-0", Version: esVersion,
+			DependsOn: []kcmv1.ServiceDependsOn{{Namespace: "nginx", Name: "nginx"}},
+		},
+	}
+
+	// CD's own ServiceSet: nginx@v4.14.3 is Deployed.
+	cdSSet := &kcmv1.ServiceSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: cd.Namespace, Name: cd.Name},
+		Spec: kcmv1.ServiceSetSpec{
+			Cluster: cd.Name,
+			Services: []kcmv1.ServiceWithValues{
+				{Namespace: "nginx", Name: "nginx", Version: &nginxVersion},
+			},
+		},
+		Status: kcmv1.ServiceSetStatus{
+			Services: []kcmv1.ServiceState{
+				{Namespace: "nginx", Name: "nginx", State: kcmv1.ServiceStateDeployed, Version: &nginxVersion},
+			},
+		},
+	}
+
+	// MCS-linked ServiceSet: same service name "nginx" but at v4.13.0, Failed.
+	// This is the ServiceSet created for the MCS that also matches this cluster.
+	mcsSSet := &kcmv1.ServiceSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: cd.Namespace, Name: cd.Name + "-3556efa5"},
+		Spec: kcmv1.ServiceSetSpec{
+			Cluster:             cd.Name,
+			MultiClusterService: "mcs1",
+			Services: []kcmv1.ServiceWithValues{
+				{Namespace: "nginx", Name: "nginx", Version: &mcsNginxVersion},
+			},
+		},
+		Status: kcmv1.ServiceSetStatus{
+			Services: []kcmv1.ServiceState{
+				{Namespace: "nginx", Name: "nginx", State: kcmv1.ServiceStateFailed, Version: &mcsNginxVersion},
+			},
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cdSSet, mcsSSet).
+		WithIndex(&kcmv1.ServiceSet{}, kcmv1.ServiceSetClusterIndexKey, kcmv1.ExtractServiceSetCluster).
+		WithIndex(&kcmv1.ServiceSet{}, kcmv1.ServiceSetMultiClusterServiceIndexKey, kcmv1.ExtractServiceSetMultiClusterService).
+		Build()
+
+	// Both services must be returned: nginx's Deployed state from the CD's own
+	// ServiceSet unlocks external-secrets regardless of the MCS's Failed nginx.
+	filtered, err := FilterServiceDependencies(t.Context(), cl, cd.Namespace, nil, cd, desired)
+	require.NoError(t, err)
+
+	names := make([]string, len(filtered))
+	for i, svc := range filtered {
+		names[i] = svc.Name
+	}
+	require.ElementsMatch(t, []string{"nginx", "external-secrets"}, names,
+		"external-secrets should be unlocked because the CD's nginx is Deployed; "+
+			"the MCS's Failed nginx must not shadow the CD's Deployed nginx")
+}

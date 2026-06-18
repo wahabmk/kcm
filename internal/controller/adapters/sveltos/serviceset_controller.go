@@ -1323,7 +1323,9 @@ func buildProfileSpec(config *apiextv1.JSON) (*addoncontrollerv1beta1.Spec, erro
 		return nil, fmt.Errorf("failed to unmarshal raw config to profile configuration: %w", err)
 	}
 
+	// wahab: priority coming from serviceSet.Spec.Provider.Config
 	tier, err := priorityToTier(pointerutil.Deref(params.Priority, int32(defaultTier)))
+	// fmt.Printf("\n>>>>>>>>>>>>>>>>>>>>> params.Priority=%d, tier=%d\n", *params.Priority, tier)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert priority to tier: %w", err)
 	}
