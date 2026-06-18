@@ -1,0 +1,43 @@
+apiVersion: k0rdent.mirantis.com/v1beta1
+kind: ClusterDeployment
+metadata:
+  name: wali-dev-1
+  namespace: kcm-system
+  labels:
+    owner: dev-team
+spec:
+  template: aws-standalone-cp-1-0-35
+  config:
+    clusterIdentity:
+      name: aws-cluster-identity
+      namespace: kcm-system
+    controlPlane:
+      amiID: ami-0fe18bc3cfa53a248
+      instanceProfile: control-plane.cluster-api-provider-aws.sigs.k8s.io
+      instanceType: t3.small
+    controlPlaneNumber: 1
+    publicIP: true
+    region: us-east-2
+    worker:
+      amiID: ami-0fe18bc3cfa53a248
+      instanceProfile: nodes.cluster-api-provider-aws.sigs.k8s.io
+      instanceType: t3.small
+    workersNumber: 1
+  credential: aws-cluster-identity-cred
+  serviceSpec:
+    provider:
+      name: ksm-projectsveltos
+      config:
+        priority: 300
+        continueOnError: true
+        stopOnConflict: false
+    services:
+      - template: ingress-nginx-4-14-3
+        name: nginx
+        namespace: nginx
+      - template: external-secrets-2-0-0
+        name: external-secrets
+        namespace: external-secrets
+        dependsOn:
+          - name: nginx
+            namespace: nginx
