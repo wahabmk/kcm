@@ -1501,6 +1501,28 @@ func Test_okToReconcileServiceSet(t *testing.T) {
 			depMCS:            newDepMCS(true, metav1.LabelSelector{}),
 			wantBlocked:       true,
 		},
+		{
+			// mgmt path, but depMCS does not self-manage, so it never targets the mgmt
+			// pseudo-cluster - there is no dependency here and reconcile may proceed.
+			name:              "mgmt path: dependency that does not target the mgmt cluster is not a dependency",
+			mcsSelfManagement: true,
+			cd:                nil,
+			depMCS:            newDepMCS(false, matchingSelector),
+		},
+		{
+			// An empty ClusterSelector matches no ClusterDeployment (mirroring reconcileUpdate),
+			// so depMCS does not target this cluster and there is no dependency.
+			name:   "dependency with empty ClusterSelector is not a dependency",
+			cd:     cd,
+			depMCS: newDepMCS(false, metav1.LabelSelector{}),
+		},
+		{
+			// depMCS's ClusterSelector does not match the cluster's labels, so it does not
+			// target this cluster and there is no dependency.
+			name:   "dependency whose ClusterSelector does not match the cluster is not a dependency",
+			cd:     cd,
+			depMCS: newDepMCS(false, metav1.LabelSelector{MatchLabels: map[string]string{"test": "false"}}),
+		},
 	}
 
 	for _, tt := range tests {
@@ -1536,7 +1558,11 @@ func Test_okToReconcileServiceSet(t *testing.T) {
 				SystemNamespace: sysNS,
 			}
 
-			blocked, err := r.okToReconcileServiceSet(t.Context(), mcs, tt.cd)
+			var blocked []blockedCluster
+			ok, err := r.okToReconcileServiceSet(t.Context(), mcs, tt.cd, &blocked)
+
+			// A real, unexpected error is returned via err; an expected blocked state is
+			// surfaced only by appending to the blocked slice (err stays nil for it).
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected err, got nil")
@@ -1545,13 +1571,123 @@ func Test_okToReconcileServiceSet(t *testing.T) {
 				t.Fatalf("expected no err, got: %v", err)
 			}
 
-			if tt.wantBlocked {
-				if blocked == nil {
-					t.Fatal("expected blocked, got nil")
-				}
-			} else if blocked != nil {
-				t.Fatalf("expected no blocked, got: %v", blocked)
+			gotBlocked := len(blocked) > 0
+			if gotBlocked != tt.wantBlocked {
+				t.Fatalf("expected blocked=%v, got %v (%v)", tt.wantBlocked, gotBlocked, blocked)
+			}
+
+			// ok gates create/update: true only when neither errored nor blocked.
+			if wantOk := !tt.wantErr && !tt.wantBlocked; ok != wantOk {
+				t.Fatalf("expected ok=%v, got %v", wantOk, ok)
 			}
 		})
+	}
+}
+
+// Test_okToReconcileServiceSet_errorAndBlocked verifies the mixed case a single-dependency
+// table cannot express: when one dependency fails with a real, unexpected error while another
+// is merely not-ready-yet, okToReconcileServiceSet must both return a non-nil err (so the
+// failure is propagated and retried with backoff) and append the not-ready cluster to blocked
+// (so it is still surfaced on mcs.Status). ok must be false.
+func Test_okToReconcileServiceSet_errorAndBlocked(t *testing.T) {
+	const (
+		mcsName     = "mcs3"
+		errDepName  = "dep-err" // dependency whose ServiceSet Get fails with a real error
+		blkDepName  = "dep-blk" // dependency that is blocked (its ServiceSet does not exist yet)
+		cdName      = "test-cd"
+		cdNamespace = "test-ns"
+		sysNS       = "kcm-system"
+	)
+
+	matchingSelector := metav1.LabelSelector{MatchLabels: map[string]string{"test": "true"}}
+	depService := kcmv1.Service{Template: "tmpl", Name: "svc", Namespace: "ns"}
+	cd := &kcmv1.ClusterDeployment{
+		ObjectMeta: metav1.ObjectMeta{Name: cdName, Namespace: cdNamespace, Labels: map[string]string{"test": "true"}},
+	}
+
+	newDep := func(name string) *kcmv1.MultiClusterService {
+		return &kcmv1.MultiClusterService{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: kcmv1.MultiClusterServiceSpec{
+				ClusterSelector: matchingSelector,
+				ServiceSpec:     kcmv1.ServiceSpec{Services: []kcmv1.Service{depService}},
+			},
+		}
+	}
+	errDep := newDep(errDepName)
+	blkDep := newDep(blkDepName)
+
+	// Fail the Get only for errDep's ServiceSet; blkDep's ServiceSet is simply absent (NotFound).
+	errDepSSetKey := serviceset.ObjectKey(sysNS, cd, errDep)
+	builder := fake.NewClientBuilder().WithScheme(testscheme.Scheme).
+		WithObjects(cd, errDep, blkDep).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if _, ok := obj.(*kcmv1.ServiceSet); ok && key == errDepSSetKey {
+					return errors.New("transient API server error")
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		})
+
+	mcs := &kcmv1.MultiClusterService{
+		ObjectMeta: metav1.ObjectMeta{Name: mcsName},
+		Spec:       kcmv1.MultiClusterServiceSpec{DependsOn: []string{errDepName, blkDepName}},
+	}
+	r := &MultiClusterServiceReconciler{Client: builder.Build(), SystemNamespace: sysNS}
+
+	var blocked []blockedCluster
+	ok, err := r.okToReconcileServiceSet(t.Context(), mcs, cd, &blocked)
+
+	if err == nil {
+		t.Fatal("expected a real error from the failing dependency, got nil")
+	}
+	if len(blocked) != 1 {
+		t.Fatalf("expected exactly one blocked cluster, got %d (%v)", len(blocked), blocked)
+	}
+	if ok {
+		t.Fatal("expected ok=false when both errored and blocked")
+	}
+}
+
+// Test_okToReconcileServiceSet_nilBlocked verifies the defensive nil-pointer guard: a blocked
+// state with a nil blocked slice pointer must not panic. ok is still false so the caller skips
+// create/update, and err stays nil since the blocked state is never folded into err.
+func Test_okToReconcileServiceSet_nilBlocked(t *testing.T) {
+	const (
+		mcsName     = "mcs4"
+		depMCSName  = "dep"
+		cdName      = "test-cd"
+		cdNamespace = "test-ns"
+		sysNS       = "kcm-system"
+	)
+
+	depMCS := &kcmv1.MultiClusterService{
+		ObjectMeta: metav1.ObjectMeta{Name: depMCSName},
+		Spec: kcmv1.MultiClusterServiceSpec{
+			ClusterSelector: metav1.LabelSelector{MatchLabels: map[string]string{"test": "true"}},
+			ServiceSpec:     kcmv1.ServiceSpec{Services: []kcmv1.Service{{Template: "tmpl", Name: "svc", Namespace: "ns"}}},
+		},
+	}
+	cd := &kcmv1.ClusterDeployment{
+		ObjectMeta: metav1.ObjectMeta{Name: cdName, Namespace: cdNamespace, Labels: map[string]string{"test": "true"}},
+	}
+	mcs := &kcmv1.MultiClusterService{
+		ObjectMeta: metav1.ObjectMeta{Name: mcsName},
+		Spec:       kcmv1.MultiClusterServiceSpec{DependsOn: []string{depMCSName}},
+	}
+
+	r := &MultiClusterServiceReconciler{
+		Client:          fake.NewClientBuilder().WithScheme(testscheme.Scheme).WithObjects(cd, depMCS).Build(),
+		SystemNamespace: sysNS,
+	}
+
+	// depMCS's ServiceSet does not exist -> blocked state, but blocked pointer is nil.
+	ok, err := r.okToReconcileServiceSet(t.Context(), mcs, cd, nil)
+	if err != nil {
+		t.Fatalf("expected no err, got: %v", err)
+	}
+	if ok {
+		t.Fatal("expected ok=false for a blocked state")
 	}
 }
