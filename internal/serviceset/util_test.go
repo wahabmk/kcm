@@ -1379,7 +1379,7 @@ func Test_GetServiceSetWithOperation_NoSpuriousUpdates(t *testing.T) {
 		Build()
 
 	opReq := OperationRequisites{
-		ObjectKey:       client.ObjectKey{Namespace: cdNamespace, Name: cdName},
+		ServiceSetKey:   client.ObjectKey{Namespace: cdNamespace, Name: cdName},
 		CD:              cd,
 		SystemNamespace: testSystemNamespace,
 	}
