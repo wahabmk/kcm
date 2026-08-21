@@ -61,6 +61,7 @@ var _ = Describe("Functional e2e tests", Label("provider:cloud", "provider:docke
 	var (
 		clusterName       string
 		clusterDeleteFunc func() error
+		mcsDeleteFunc     func() error
 
 		helmRepositorySpec   sourcev1.HelmRepositorySpec
 		serviceTemplateSpecs []kcmv1.ServiceTemplateSpec
@@ -170,6 +171,18 @@ var _ = Describe("Functional e2e tests", Label("provider:cloud", "provider:docke
 	})
 
 	AfterEach(func() {
+		// The MultiClusterService must be torn down here rather than only at the end of the
+		// spec that created it: these specs are Ordered/ContinueOnFailure and all reuse the
+		// same MultiClusterService name, while CreateMultiClusterService ignores AlreadyExists.
+		// One spec failing before its inline delete would otherwise leave its MultiClusterService
+		// behind, and every later spec would silently validate that stale object - still carrying
+		// the previous spec's ClusterSelector - instead of the one it meant to create.
+		if mcsDeleteFunc != nil {
+			err := mcsDeleteFunc()
+			mcsDeleteFunc = nil
+			Expect(err).NotTo(HaveOccurred(), "failed to delete MultiClusterService")
+		}
+
 		if clusterDeleteFunc != nil {
 			err := clusterDeleteFunc()
 			clusterDeleteFunc = nil
@@ -212,13 +225,14 @@ var _ = Describe("Functional e2e tests", Label("provider:cloud", "provider:docke
 			clusterDeleteFunc = deleteFn
 
 			mcs := multiclusterservice.BuildMultiClusterService(sd, multiClusterServiceTemplate, openCostChartName, multiClusterServiceMatchLabel, multiClusterServiceName)
-			multiclusterservice.CreateMultiClusterService(ctx, kc.CrClient, mcs)
+			mcsDeleteFunc = multiclusterservice.CreateMultiClusterServiceWithDelete(ctx, kc.CrClient, mcs)
 			multiclusterservice.ValidateMultiClusterService(ctx, kc, multiClusterServiceName, 1)
 
 			updateClusterDeploymentLabel(ctx, kc.CrClient, sd, multiClusterServiceMatchLabel, "not-matched")
 			multiclusterservice.ValidateMultiClusterService(ctx, kc, multiClusterServiceName, 0)
 
-			multiclusterservice.DeleteMultiClusterService(ctx, kc.CrClient, mcs)
+			Expect(mcsDeleteFunc()).Error().NotTo(HaveOccurred(), "failed to delete MultiClusterService")
+			mcsDeleteFunc = nil
 			Expect(clusterDeleteFunc()).Error().NotTo(HaveOccurred(), "failed to delete cluster")
 			clusterDeleteFunc = nil
 		})
@@ -405,7 +419,7 @@ var _ = Describe("Functional e2e tests", Label("provider:cloud", "provider:docke
 			mcs := multiclusterservice.BuildMultiClusterService(sd, multiClusterServiceTemplate, openCostChartName, multiClusterServiceMatchLabel, multiClusterServiceName)
 			mcsServiceSpec := mcs.Spec.ServiceSpec
 			mcs.Spec.ServiceSpec = kcmv1.ServiceSpec{}
-			multiclusterservice.CreateMultiClusterService(ctx, kc.CrClient, mcs)
+			mcsDeleteFunc = multiclusterservice.CreateMultiClusterServiceWithDelete(ctx, kc.CrClient, mcs)
 
 			Eventually(func() error {
 				Expect(kc.CrClient.Get(ctx, crclient.ObjectKeyFromObject(mcs), mcs)).NotTo(HaveOccurred(), "failed to fetch MulticlusterService")
@@ -449,7 +463,7 @@ var _ = Describe("Functional e2e tests", Label("provider:cloud", "provider:docke
 			mcs := multiclusterservice.BuildMultiClusterService(sd, multiClusterServiceTemplate, openCostChartName, multiClusterServiceMatchLabel, multiClusterServiceName)
 			mcsServiceSpec := mcs.Spec.ServiceSpec
 			mcs.Spec.ServiceSpec = kcmv1.ServiceSpec{}
-			multiclusterservice.CreateMultiClusterService(ctx, kc.CrClient, mcs)
+			mcsDeleteFunc = multiclusterservice.CreateMultiClusterServiceWithDelete(ctx, kc.CrClient, mcs)
 
 			Eventually(func() error {
 				Expect(kc.CrClient.Get(ctx, crclient.ObjectKeyFromObject(mcs), mcs)).NotTo(HaveOccurred(), "failed to fetch MulticlusterService")
@@ -472,7 +486,8 @@ var _ = Describe("Functional e2e tests", Label("provider:cloud", "provider:docke
 			waitForServiceDeployments(ctx, kc, sd, mcs.Spec.ServiceSpec.Services)
 			validateClusterProfile(ctx, serviceSetObjectKey, mcs.Spec.ServiceSpec, kc)
 
-			multiclusterservice.DeleteMultiClusterService(ctx, kc.CrClient, mcs)
+			Expect(mcsDeleteFunc()).Error().NotTo(HaveOccurred(), "failed to delete MultiClusterService")
+			mcsDeleteFunc = nil
 			Expect(clusterDeleteFunc()).Error().NotTo(HaveOccurred(), "failed to delete cluster")
 			clusterDeleteFunc = nil
 		})

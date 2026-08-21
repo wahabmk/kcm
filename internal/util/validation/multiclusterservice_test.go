@@ -47,7 +47,7 @@ func TestValidateMCSDependency(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "a"},
 				Spec:       kcmv1.MultiClusterServiceSpec{DependsOn: []string{"b"}},
 			},
-			expectedErr: "dependency /b of /a is not defined",
+			expectedErr: "dependency b of a is not defined",
 		},
 		{
 			testName: "mcs A->B and B exists",
@@ -72,7 +72,7 @@ func TestValidateMCSDependency(t *testing.T) {
 					{ObjectMeta: metav1.ObjectMeta{Name: "b"}},
 				},
 			},
-			expectedErr: "dependency /c of /a is not defined",
+			expectedErr: "dependency c of a is not defined",
 		},
 		{
 			testName: "A->BC and B exists and C exists",
@@ -89,7 +89,7 @@ func TestValidateMCSDependency(t *testing.T) {
 		},
 	} {
 		t.Run(tc.testName, func(t *testing.T) {
-			if err := validateMCSDependency(tc.mcs, tc.mcsList); err != nil {
+			if err := validateMCSDependency(tc.mcs, mcsList2mcsCommonList(tc.mcsList)); err != nil {
 				require.EqualError(t, err, tc.expectedErr)
 			} else {
 				require.NoError(t, err)
@@ -302,7 +302,7 @@ func TestValidateMCSDependencyCycle(t *testing.T) {
 		},
 	} {
 		t.Run(tc.testName, func(t *testing.T) {
-			err := validateMCSDependencyCycle(tc.mcs, tc.mcsList)
+			err := validateMCSDependencyCycle(tc.mcs, mcsList2mcsCommonList(tc.mcsList))
 			if tc.isErr {
 				require.Error(t, err)
 			} else {
@@ -441,7 +441,7 @@ func TestGenerateMCSDependencyGraph(t *testing.T) {
 		},
 	} {
 		t.Run(tc.testName, func(t *testing.T) {
-			graph := generateMCSDependencyGraph(tc.mcsList)
+			graph := generateMCSDependencyGraph(mcsList2mcsCommonList(tc.mcsList))
 			if !equality.Semantic.DeepEqual(graph, tc.expectedGraph) {
 				t.Errorf("generateMCSDependencyGraph(%s): \n\texpected:\n\t%v\n\n\tactual:\n\t%v", tc.testName, tc.expectedGraph, graph)
 			}
@@ -595,10 +595,23 @@ func TestGenerateReverseMCSDependencyGraph(t *testing.T) {
 		},
 	} {
 		t.Run(tc.testName, func(t *testing.T) {
-			graph := generateReverseMCSDependencyGraph(tc.mcsList)
+			graph := generateReverseMCSDependencyGraph(mcsList2mcsCommonList(tc.mcsList))
 			if !equality.Semantic.DeepEqual(graph, tc.expectedGraph) {
 				t.Errorf("generateMCSDependencyGraph(%s): \n\texpected:\n\t%v\n\n\tactual:\n\t%v", tc.testName, tc.expectedGraph, graph)
 			}
 		})
 	}
+}
+
+func mcsList2mcsCommonList(mcsList *kcmv1.MultiClusterServiceList) []kcmv1.MultiClusterServiceCommon {
+	if mcsList == nil {
+		return nil
+	}
+
+	list := make([]kcmv1.MultiClusterServiceCommon, len(mcsList.Items))
+	for i, mcs := range mcsList.Items {
+		list[i] = &mcs
+	}
+
+	return list
 }
