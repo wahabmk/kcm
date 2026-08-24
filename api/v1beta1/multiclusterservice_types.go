@@ -66,10 +66,10 @@ const (
 	MultiClusterServiceDependencyReadyCondition = "MultiClusterServiceDependencyReady"
 
 	// ServiceDependencyReadyCondition defines the condition of whether every service declared
-	// in this MultiClusterService has been propagated into the ServiceSets it owns. Services
-	// declaring a dependsOn are held at their previously deployed template until that
-	// dependency is deployed at its own desired version, so this condition is False while any
-	// such hold is in effect.
+	// on this object has been propagated into the ServiceSets it owns. Services declaring a
+	// dependsOn are held at their previously deployed template until that dependency is
+	// deployed at its own desired version, so this condition is False while any such hold is
+	// in effect. Set on both MultiClusterService and ClusterDeployment.
 	ServiceDependencyReadyCondition = "ServiceDependencyReady"
 )
 
@@ -98,9 +98,9 @@ const (
 	// MultiClusterService from determining whether its MultiClusterService dependencies are ready
 	// on one or more matching clusters.
 	MultiClusterServiceDependencyCheckFailedReason = "MultiClusterServiceDependencyCheckFailed"
-	// ServiceDependencyNotReadyReason signals that one or more services declared in this
-	// MultiClusterService have not been propagated into an owned ServiceSet yet, because a
-	// service they dependsOn is not deployed at its desired version.
+	// ServiceDependencyNotReadyReason signals that one or more services declared on a
+	// MultiClusterService or ClusterDeployment have not been propagated into an owned
+	// ServiceSet yet, because a service they dependsOn is not deployed at its desired version.
 	ServiceDependencyNotReadyReason = "ServiceDependencyNotReady"
 )
 

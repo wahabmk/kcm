@@ -137,7 +137,7 @@ func Test_heldServices(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			gotHeld, gotDesired := heldServices(tc.mcs, tc.serviceSets)
+			gotHeld, gotDesired := heldServices(tc.mcs.Spec.ServiceSpec.Services, tc.serviceSets)
 			assert.Equal(t, tc.wantDesired, gotDesired)
 			assert.Equal(t, tc.wantHeld, gotHeld)
 		})
@@ -161,7 +161,7 @@ func Test_heldServices_DeterministicOrder(t *testing.T) {
 	)}
 
 	for range 20 {
-		held, _ := heldServices(mcs, serviceSets)
+		held, _ := heldServices(mcs.Spec.ServiceSpec.Services, serviceSets)
 		require.Len(t, held, 3)
 		assert.Equal(t, []string{"z", "m", "a"}, []string{held[0].key.Name, held[1].key.Name, held[2].key.Name})
 	}
@@ -233,13 +233,14 @@ func Test_setServiceDependencyReadyCondition(t *testing.T) {
 		kcmv1.Service{Name: "a", Namespace: heldTestNS, Template: "cat-1.1.0"},
 		kcmv1.Service{Name: "b", Namespace: heldTestNS, Template: "auth-1.1.0"},
 	)
-	r := &MultiClusterServiceReconciler{}
-
+	setCond := func(obj *kcmv1.MultiClusterService, serviceSets []kcmv1.ServiceSet) {
+		setServiceDependencyReadyCondition(&obj.Status.Conditions, obj.Generation, obj.Spec.ServiceSpec.Services, serviceSets)
+	}
 	t.Run("all propagated: ready", func(t *testing.T) {
 		t.Parallel()
 
 		obj := mcs.DeepCopy()
-		r.setServiceDependencyReadyCondition(obj, []kcmv1.ServiceSet{heldTestServiceSet("",
+		setCond(obj, []kcmv1.ServiceSet{heldTestServiceSet("",
 			kcmv1.ServiceWithValues{Name: "a", Namespace: heldTestNS, Template: "cat-1.1.0"},
 			kcmv1.ServiceWithValues{Name: "b", Namespace: heldTestNS, Template: "auth-1.1.0"},
 		)})
@@ -257,7 +258,7 @@ func Test_setServiceDependencyReadyCondition(t *testing.T) {
 		t.Parallel()
 
 		obj := mcs.DeepCopy()
-		r.setServiceDependencyReadyCondition(obj, []kcmv1.ServiceSet{heldTestServiceSet("",
+		setCond(obj, []kcmv1.ServiceSet{heldTestServiceSet("",
 			kcmv1.ServiceWithValues{Name: "a", Namespace: heldTestNS, Template: "cat-1.1.0"},
 			kcmv1.ServiceWithValues{Name: "b", Namespace: heldTestNS, Template: "auth-1.0.1"},
 		)})
@@ -275,5 +276,105 @@ func Test_setServiceDependencyReadyCondition(t *testing.T) {
 		require.NotNil(t, ready)
 		assert.Equal(t, metav1.ConditionFalse, ready.Status,
 			"a silently held service must not leave the MultiClusterService reporting Ready")
+	})
+}
+
+// The ClusterDeployment path shares the helpers but has a narrowing of its own: the
+// ServiceSets it lists are indexed by cluster, so the list also contains ServiceSets owned
+// by MultiClusterServices matching that cluster. Those carry a different set of desired
+// services and must not be measured against the ClusterDeployment's own spec.
+func Test_setServiceDependencyReadyCondition_ClusterDeployment(t *testing.T) {
+	t.Parallel()
+
+	cd := &kcmv1.ClusterDeployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "cd", Namespace: "ns", Generation: 4},
+		Spec: kcmv1.ClusterDeploymentSpec{
+			ServiceSpec: kcmv1.ServiceSpec{Services: []kcmv1.Service{
+				{Name: "a", Namespace: heldTestNS, Template: "cat-1.1.0"},
+				{Name: "b", Namespace: heldTestNS, Template: "auth-1.1.0"},
+			}},
+		},
+	}
+
+	ownServiceSet := func(services ...kcmv1.ServiceWithValues) kcmv1.ServiceSet {
+		ss := heldTestServiceSet("cd", services...)
+		ss.Namespace = "ns"
+		return ss
+	}
+	mcsServiceSet := func(services ...kcmv1.ServiceWithValues) kcmv1.ServiceSet {
+		ss := ownServiceSet(services...)
+		ss.Spec.MultiClusterService = "some-mcs"
+		return ss
+	}
+
+	setCond := func(obj *kcmv1.ClusterDeployment, serviceSets []kcmv1.ServiceSet) {
+		// Mirrors the narrowing updateServices applies before calling through.
+		own := make([]kcmv1.ServiceSet, 0, len(serviceSets))
+		for _, ss := range serviceSets {
+			if ss.Spec.MultiClusterService == "" {
+				own = append(own, ss)
+			}
+		}
+		setServiceDependencyReadyCondition(&obj.Status.Conditions, obj.Generation, obj.Spec.ServiceSpec.Services, own)
+	}
+
+	t.Run("all propagated into the ClusterDeployment's own ServiceSet: ready", func(t *testing.T) {
+		t.Parallel()
+
+		obj := cd.DeepCopy()
+		setCond(obj, []kcmv1.ServiceSet{ownServiceSet(
+			kcmv1.ServiceWithValues{Name: "a", Namespace: heldTestNS, Template: "cat-1.1.0"},
+			kcmv1.ServiceWithValues{Name: "b", Namespace: heldTestNS, Template: "auth-1.1.0"},
+		)})
+
+		cond := apimeta.FindStatusCondition(obj.Status.Conditions, kcmv1.ServiceDependencyReadyCondition)
+		require.NotNil(t, cond)
+		assert.Equal(t, metav1.ConditionTrue, cond.Status)
+		assert.Equal(t, obj.Generation, cond.ObservedGeneration)
+	})
+
+	t.Run("a ServiceSet owned by a MultiClusterService is not measured against the ClusterDeployment spec", func(t *testing.T) {
+		t.Parallel()
+
+		obj := cd.DeepCopy()
+		setCond(obj, []kcmv1.ServiceSet{
+			ownServiceSet(
+				kcmv1.ServiceWithValues{Name: "a", Namespace: heldTestNS, Template: "cat-1.1.0"},
+				kcmv1.ServiceWithValues{Name: "b", Namespace: heldTestNS, Template: "auth-1.1.0"},
+			),
+			// Entirely unrelated services, and none of the ClusterDeployment's own.
+			mcsServiceSet(kcmv1.ServiceWithValues{Name: "mcs-svc", Namespace: heldTestNS, Template: "other-1.0.0"}),
+		})
+
+		cond := apimeta.FindStatusCondition(obj.Status.Conditions, kcmv1.ServiceDependencyReadyCondition)
+		require.NotNil(t, cond)
+		assert.Equal(t, metav1.ConditionTrue, cond.Status,
+			"the MultiClusterService-owned ServiceSet has none of this ClusterDeployment's services and must be ignored")
+	})
+
+	t.Run("a dependent held at its old template: not ready, and Ready flips false as Progressing", func(t *testing.T) {
+		t.Parallel()
+
+		obj := cd.DeepCopy()
+		setCond(obj, []kcmv1.ServiceSet{ownServiceSet(
+			kcmv1.ServiceWithValues{Name: "a", Namespace: heldTestNS, Template: "cat-1.1.0"},
+			kcmv1.ServiceWithValues{Name: "b", Namespace: heldTestNS, Template: "auth-1.0.1"},
+		)})
+
+		cond := apimeta.FindStatusCondition(obj.Status.Conditions, kcmv1.ServiceDependencyReadyCondition)
+		require.NotNil(t, cond)
+		assert.Equal(t, metav1.ConditionFalse, cond.Status)
+		assert.Equal(t, kcmv1.ServiceDependencyNotReadyReason, cond.Reason)
+		assert.Contains(t, cond.Message, "k0rdent-apis/b has auth-1.0.1, wants auth-1.1.0")
+
+		obj.Status.Conditions = conditionsutil.UpdateReadyCondition(
+			obj.Status.Conditions, obj.Generation, handleClusterDeploymentFailedConditions)
+
+		ready := apimeta.FindStatusCondition(obj.Status.Conditions, kcmv1.ReadyCondition)
+		require.NotNil(t, ready)
+		assert.Equal(t, metav1.ConditionFalse, ready.Status,
+			"a silently held service must not leave the ClusterDeployment reporting Ready")
+		assert.Equal(t, kcmv1.ProgressingReason, ready.Reason,
+			"a dependency hold is deliberate and self-resolving, so it is Progressing rather than Failed")
 	})
 }
