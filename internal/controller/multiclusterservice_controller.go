@@ -252,30 +252,11 @@ func (r *MultiClusterServiceReconciler) reconcileUpdate(ctx context.Context, mcs
 	}
 	l.V(1).Info("ServiceSets matching MCS found", "MCS", mcs.Name, "count", len(serviceSetList.Items))
 
-	// Filter ServiceSets down to the ones whose target cluster currently matches
-	// the selector (or the self-management ServiceSet when SelfManagement is on).
-	// With KeepServicesOnSelectorMismatch=true the full serviceSetList includes
-	// ServiceSets we intentionally preserved on clusters that no longer match;
-	// those should not be counted in ClusterInReadyState (numerator) nor surfaced
-	// in `.status.matchingClusters`, both of which are defined as scoped to
-	// currently-matching clusters. The preserved ServiceSets still exist
-	// on cluster and continue running their services — they're just not
-	// reflected in MCS status until their cluster matches again.
-	currentlyMatchingServiceSets := make([]kcmv1.ServiceSet, 0, len(serviceSetList.Items))
-	for _, ss := range serviceSetList.Items {
-		if ss.Spec.Cluster == "" {
-			if mcs.Spec.ServiceSpec.Provider.SelfManagement {
-				currentlyMatchingServiceSets = append(currentlyMatchingServiceSets, ss)
-			}
-			continue
-		}
-		if _, ok := matchingClusterKeys[client.ObjectKey{Namespace: ss.Namespace, Name: ss.Spec.Cluster}]; ok {
-			currentlyMatchingServiceSets = append(currentlyMatchingServiceSets, ss)
-		}
-	}
+	currentlyMatchingServiceSets := filterCurrentlyMatchingServiceSets(mcs, serviceSetList.Items, matchingClusterKeys)
 
 	r.setClustersCondition(ctx, mcs, totalMatchingClusters, currentlyMatchingServiceSets, blocked)
 	r.setDependencyReadyCondition(mcs, blocked, dependencyCheckErrs)
+	r.setServiceDependencyReadyCondition(mcs, currentlyMatchingServiceSets)
 
 	// setMatchingClusters must run even when errs is non-nil. A single reconcile can both hit a
 	// real error on one cluster/dependency and find another cluster blocked (see
@@ -457,6 +438,185 @@ func countJoinedErrors(err error) int {
 		n += countJoinedErrors(e)
 	}
 	return n
+}
+
+// filterCurrentlyMatchingServiceSets narrows serviceSets to the ones whose target cluster
+// currently matches the selector (or the self-management ServiceSet when SelfManagement is on).
+//
+// With KeepServicesOnSelectorMismatch=true the listed ServiceSets include ones we intentionally
+// preserved on clusters that no longer match; those should not be counted in ClusterInReadyState
+// (numerator) nor surfaced in `.status.matchingClusters`, both of which are defined as scoped to
+// currently-matching clusters. The preserved ServiceSets still exist on cluster and continue
+// running their services — they're just not reflected in MCS status until their cluster matches
+// again.
+func filterCurrentlyMatchingServiceSets(
+	mcs *kcmv1.MultiClusterService,
+	serviceSets []kcmv1.ServiceSet,
+	matchingClusterKeys map[client.ObjectKey]struct{},
+) []kcmv1.ServiceSet {
+	result := make([]kcmv1.ServiceSet, 0, len(serviceSets))
+	for _, ss := range serviceSets {
+		if ss.Spec.Cluster == "" {
+			if mcs.Spec.ServiceSpec.Provider.SelfManagement {
+				result = append(result, ss)
+			}
+			continue
+		}
+		if _, ok := matchingClusterKeys[client.ObjectKey{Namespace: ss.Namespace, Name: ss.Spec.Cluster}]; ok {
+			result = append(result, ss)
+		}
+	}
+	return result
+}
+
+// heldService describes a service declared in a MultiClusterService whose desired
+// ServiceTemplate has not been propagated into an owned ServiceSet yet.
+type heldService struct {
+	key client.ObjectKey
+	// want is the template the MultiClusterService asks for.
+	want string
+	// got is the template currently in the ServiceSet spec, empty when the service
+	// is not present in the spec at all (never added, or dropped while locked).
+	got string
+	// clusters counts the matching clusters holding this service back.
+	clusters int
+}
+
+// maxHeldServicesListed bounds how many held services the ServiceDependencyReady message
+// names individually. The full set is recoverable by diffing the MultiClusterService spec
+// against the owned ServiceSets; the condition only has to make the hold discoverable.
+const maxHeldServicesListed = 3
+
+// maxHeldServicesMessageBytes bounds the rendered message. Service, namespace and template
+// names are each up to 253 bytes, so even a handful of named entries can grow large, and
+// this string is persisted on mcs.Status.
+const maxHeldServicesMessageBytes = 1024
+
+// setServiceDependencyReadyCondition updates the ServiceDependencyReady condition, which
+// reports whether every service declared in this MultiClusterService has reached the
+// ServiceSets it owns.
+//
+// serviceset.FilterServiceDependencies deliberately holds a service back while a service it
+// dependsOn is not yet deployed at its own desired version, carrying the previously deployed
+// template over into the new ServiceSet spec. That is correct during a rollout, but until this
+// condition existed it was entirely unobservable: the owned ServiceSet keeps reporting Deployed
+// because the held services really are deployed - just at their old templates - so
+// ClusterInReadyState stays True and the MultiClusterService kept reporting Ready=True at the
+// current observedGeneration while quietly running a spec the user replaced. A hold that never
+// resolves then looks identical to a converged deployment (KSM-207). Reporting it as a
+// condition also flips Ready to False for as long as it lasts, via UpdateReadyCondition.
+//
+// Note this is scoped to propagation into existing ServiceSets: a matching cluster with no
+// ServiceSet at all is covered by ClusterInReadyState and, when a MultiClusterService
+// dependency is what blocks its creation, by MultiClusterServiceDependencyReady.
+func (*MultiClusterServiceReconciler) setServiceDependencyReadyCondition(mcs *kcmv1.MultiClusterService, serviceSets []kcmv1.ServiceSet) {
+	c := metav1.Condition{
+		Type:               kcmv1.ServiceDependencyReadyCondition,
+		Status:             metav1.ConditionTrue,
+		Reason:             kcmv1.SucceededReason,
+		ObservedGeneration: mcs.Generation,
+	}
+
+	if held, desired := heldServices(mcs, serviceSets); len(held) > 0 {
+		c.Status = metav1.ConditionFalse
+		c.Reason = kcmv1.ServiceDependencyNotReadyReason
+		c.Message = heldServicesMessage(held, desired)
+	}
+
+	apimeta.SetStatusCondition(&mcs.Status.Conditions, c)
+}
+
+// heldServices returns the services whose desired template has not reached at least one of the
+// owned ServiceSets, in MultiClusterService spec order, along with the number of services that
+// were expected to propagate at all.
+//
+// Services marked Disable are excluded: serviceset.ServicesToDeploy never emits them, so their
+// absence from the ServiceSet spec is intentional rather than a hold.
+func heldServices(mcs *kcmv1.MultiClusterService, serviceSets []kcmv1.ServiceSet) (_ []heldService, desired int) {
+	wanted := make(map[client.ObjectKey]string, len(mcs.Spec.ServiceSpec.Services))
+	order := make([]client.ObjectKey, 0, len(mcs.Spec.ServiceSpec.Services))
+	for _, svc := range mcs.Spec.ServiceSpec.Services {
+		if svc.Disable {
+			continue
+		}
+		key := serviceset.ServiceKey(svc.Namespace, svc.Name)
+		if _, seen := wanted[key]; !seen {
+			order = append(order, key)
+		}
+		wanted[key] = svc.Template
+	}
+	if len(wanted) == 0 {
+		return nil, 0
+	}
+
+	held := make(map[client.ObjectKey]*heldService, len(wanted))
+	for _, ss := range serviceSets {
+		// A ServiceSet being deleted is on its way out; its spec is not a propagation target.
+		if !ss.DeletionTimestamp.IsZero() {
+			continue
+		}
+
+		deployed := make(map[client.ObjectKey]string, len(ss.Spec.Services))
+		for _, svc := range ss.Spec.Services {
+			deployed[serviceset.ServiceKey(svc.Namespace, svc.Name)] = svc.Template
+		}
+
+		for key, want := range wanted {
+			got, present := deployed[key]
+			if present && got == want {
+				continue
+			}
+			h, ok := held[key]
+			if !ok {
+				h = &heldService{key: key, want: want, got: got}
+				held[key] = h
+			}
+			h.clusters++
+		}
+	}
+
+	if len(held) == 0 {
+		return nil, len(wanted)
+	}
+
+	result := make([]heldService, 0, len(held))
+	for _, key := range order {
+		if h, ok := held[key]; ok {
+			result = append(result, *h)
+		}
+	}
+	return result, len(wanted)
+}
+
+// heldServicesMessage renders held into a message bounded to maxHeldServicesMessageBytes.
+func heldServicesMessage(held []heldService, desired int) string {
+	listed := min(len(held), maxHeldServicesListed)
+	parts := make([]string, 0, listed)
+	for _, h := range held[:listed] {
+		got := h.got
+		if got == "" {
+			got = "<not present>"
+		}
+		part := fmt.Sprintf("%s/%s has %s, wants %s", h.key.Namespace, h.key.Name, got, h.want)
+		if h.clusters > 1 {
+			part += fmt.Sprintf(" (on %d clusters)", h.clusters)
+		}
+		parts = append(parts, part)
+	}
+
+	msg := fmt.Sprintf("%d of %d service(s) not yet propagated to the owned ServiceSet(s), waiting on service dependencies: %s",
+		len(held), desired, strings.Join(parts, "; "))
+	if len(held) > listed {
+		msg += fmt.Sprintf("; and %d more", len(held)-listed)
+	}
+	if len(msg) <= maxHeldServicesMessageBytes {
+		return msg
+	}
+
+	omittedBytes := len(msg) - maxHeldServicesMessageBytes
+	truncated := strings.ToValidUTF8(msg[:maxHeldServicesMessageBytes], "")
+	return fmt.Sprintf("%s... (%d bytes omitted, diff the MultiClusterService spec against the owned ServiceSet(s) for the full list)",
+		truncated, omittedBytes)
 }
 
 // setMatchingClusters collects service deployments status on matching clusters from ServiceSet objects and
