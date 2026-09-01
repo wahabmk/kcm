@@ -2596,3 +2596,148 @@ func Test_okToReconcileServiceSet_nilBlocked(t *testing.T) {
 		t.Fatal("expected ok=false for a blocked state")
 	}
 }
+
+// Test_resolveDependencies_namespaced guards resolveDependencies' NamespacedMultiClusterService
+// branch, which fetches *kcmv1.NamespacedMultiClusterService (not *kcmv1.MultiClusterService) and
+// keys the lookup by {Namespace: mcs.GetNamespace(), Name: dep} - a dependency in a different
+// namespace, even with the right name, must not resolve.
+func Test_resolveDependencies_namespaced(t *testing.T) {
+	t.Parallel()
+
+	const ns = "team-a"
+
+	depService := kcmv1.Service{Template: "tmpl", Name: "svc", Namespace: "ns"}
+	depInNS := &kcmv1.NamespacedMultiClusterService{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "dep"},
+		Spec: kcmv1.MultiClusterServiceSpec{
+			ServiceSpec: kcmv1.ServiceSpec{Services: []kcmv1.Service{depService}},
+		},
+	}
+	// Same name, wrong namespace - must not be picked up as the "dep" dependency of an NMCS in ns.
+	depInOtherNS := &kcmv1.NamespacedMultiClusterService{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "team-b", Name: "dep"},
+	}
+
+	r := &NamespacedMultiClusterServiceReconciler{
+		MultiClusterServiceCommonReconciler{
+			Client:          fake.NewClientBuilder().WithScheme(testscheme.Scheme).WithObjects(depInNS, depInOtherNS).Build(),
+			SystemNamespace: testSystemNamespace,
+		},
+	}
+
+	subject := &kcmv1.NamespacedMultiClusterService{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "subject"},
+		Spec:       kcmv1.MultiClusterServiceSpec{DependsOn: []string{"dep"}},
+	}
+
+	deps := r.resolveDependencies(t.Context(), subject)
+	if len(deps) != 1 {
+		t.Fatalf("expected 1 resolved dependency, got %d", len(deps))
+	}
+
+	got := deps[0]
+	if got.getErr != nil {
+		t.Fatalf("expected the same-namespace dependency to resolve without error, got: %v", got.getErr)
+	}
+	if got.kind != kcmv1.NamespacedMultiClusterServiceKind {
+		t.Fatalf("expected kind %s, got %s", kcmv1.NamespacedMultiClusterServiceKind, got.kind)
+	}
+	wantKey := client.ObjectKey{Namespace: ns, Name: "dep"}
+	if got.mcsKey != wantKey {
+		t.Fatalf("expected mcsKey %s, got %s", wantKey, got.mcsKey)
+	}
+	if _, ok := got.mcs.(*kcmv1.NamespacedMultiClusterService); !ok {
+		t.Fatalf("expected resolved dependency to be a *kcmv1.NamespacedMultiClusterService, got %T", got.mcs)
+	}
+	if got.mcs.GetNamespace() != ns {
+		t.Fatalf("expected the resolved dependency to be the one in namespace %s, got %s", ns, got.mcs.GetNamespace())
+	}
+}
+
+// Test_okToReconcileServiceSet_namespaced is Test_okToReconcileServiceSet's counterpart for
+// NamespacedMultiClusterService: it guards that dependency resolution and blocking work
+// end-to-end when both the subject and its dependency are namespaced, and that
+// serviceset.ObjectKey (keyed on dep.mcs, a *kcmv1.NamespacedMultiClusterService) is used to look
+// up the dependency's ServiceSet consistently with how NamespacedMultiClusterServiceCommonReconciler
+// creates it.
+func Test_okToReconcileServiceSet_namespaced(t *testing.T) {
+	t.Parallel()
+
+	const (
+		mcsName     = "nmcs2"
+		depMCSName  = "nmcs1"
+		cdName      = "test-cd"
+		cdNamespace = "team-a"
+	)
+
+	depService := kcmv1.Service{Template: "tmpl", Name: "svc", Namespace: "ns"}
+	matchingSelector := metav1.LabelSelector{MatchLabels: map[string]string{"test": "true"}}
+
+	cd := &kcmv1.ClusterDeployment{
+		ObjectMeta: metav1.ObjectMeta{Name: cdName, Namespace: cdNamespace, Labels: map[string]string{"test": "true"}},
+	}
+	depMCS := &kcmv1.NamespacedMultiClusterService{
+		ObjectMeta: metav1.ObjectMeta{Namespace: cdNamespace, Name: depMCSName},
+		Spec: kcmv1.MultiClusterServiceSpec{
+			ClusterSelector: matchingSelector,
+			ServiceSpec:     kcmv1.ServiceSpec{Services: []kcmv1.Service{depService}},
+		},
+	}
+	mcs := &kcmv1.NamespacedMultiClusterService{
+		ObjectMeta: metav1.ObjectMeta{Namespace: cdNamespace, Name: mcsName},
+		Spec:       kcmv1.MultiClusterServiceSpec{DependsOn: []string{depMCSName}},
+	}
+
+	newReconciler := func(objs ...client.Object) *NamespacedMultiClusterServiceReconciler {
+		return &NamespacedMultiClusterServiceReconciler{
+			MultiClusterServiceCommonReconciler{
+				Client:          fake.NewClientBuilder().WithScheme(testscheme.Scheme).WithObjects(objs...).Build(),
+				SystemNamespace: testSystemNamespace,
+			},
+		}
+	}
+
+	t.Run("dependency ServiceSet not yet created is an expected blocked state", func(t *testing.T) {
+		t.Parallel()
+
+		r := newReconciler(cd, depMCS)
+		var blocked []blockedCluster
+		deps := r.resolveDependencies(t.Context(), mcs)
+		ok, err := r.okToReconcileServiceSet(t.Context(), cd, deps, &blocked)
+		if err != nil {
+			t.Fatalf("expected no err, got: %v", err)
+		}
+		if ok {
+			t.Fatal("expected ok=false for a blocked state")
+		}
+		if len(blocked) != 1 {
+			t.Fatalf("expected exactly 1 blocked entry, got %d", len(blocked))
+		}
+	})
+
+	t.Run("dependency fully deployed: neither blocked nor error", func(t *testing.T) {
+		t.Parallel()
+
+		ssetKey := serviceset.ObjectKey(testSystemNamespace, cd, depMCS)
+		sset := &kcmv1.ServiceSet{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ssetKey.Namespace, Name: ssetKey.Name},
+			Spec:       kcmv1.ServiceSetSpec{Cluster: cdName, NamespacedMultiClusterService: depMCS.GetFullname()},
+			Status: kcmv1.ServiceSetStatus{
+				Services: []kcmv1.ServiceState{
+					{Name: depService.Name, Namespace: depService.Namespace, State: kcmv1.ServiceStateDeployed},
+				},
+			},
+		}
+
+		r := newReconciler(cd, depMCS, sset)
+		var blocked []blockedCluster
+		deps := r.resolveDependencies(t.Context(), mcs)
+		ok, err := r.okToReconcileServiceSet(t.Context(), cd, deps, &blocked)
+		if err != nil {
+			t.Fatalf("expected no err, got: %v", err)
+		}
+		if !ok {
+			t.Fatalf("expected ok=true, got blocked=%v", blocked)
+		}
+	})
+}
