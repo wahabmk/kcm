@@ -60,12 +60,12 @@ const (
 	// ServicesDependencyValidationCondition defines the condition of services' dependencies.
 	ServicesDependencyValidationCondition = "ServicesDependencyValidation"
 
-	// MultiClusterServiceDependencyValidationCondition defines the condition of MultiClusterService dependencies.
+	// MultiClusterServiceDependencyValidationCondition defines the condition of MultiClusterService/NamespacedMultiClusterService dependencies.
 	MultiClusterServiceDependencyValidationCondition = "MultiClusterServiceDependencyValidation"
 
 	// MultiClusterServiceDependencyReadyCondition defines the condition of whether every
-	// MultiClusterService this one depends on has finished deploying its services to
-	// every cluster this MultiClusterService matches.
+	// MultiClusterService/NamespacedMultiClusterService that this one depends on has
+	// finished deploying its services to every cluster this one matches.
 	MultiClusterServiceDependencyReadyCondition = "MultiClusterServiceDependencyReady"
 )
 
@@ -87,12 +87,12 @@ const (
 	SveltosFeatureReadyReason = "SveltosFeatureReady"
 	// SveltosFeatureNotReadyReason signals that the feature managed by Sveltos on target cluster is not yet ready.
 	SveltosFeatureNotReadyReason = "SveltosFeatureNotReady"
-	// MultiClusterServiceDependencyNotReadyReason signals that this MultiClusterService is waiting for
-	// a MultiClusterService it depends on to deploy its services to one or more matching clusters.
+	// MultiClusterServiceDependencyNotReadyReason signals that this MultiClusterService/NamespacedMultiClusterService is waiting for
+	// a MultiClusterService/NamespacedMultiClusterService it depends on to deploy its services to one or more matching clusters.
 	MultiClusterServiceDependencyNotReadyReason = "MultiClusterServiceDependencyNotReady"
-	// MultiClusterServiceDependencyCheckFailedReason signals that an unexpected error prevented this
-	// MultiClusterService from determining whether its MultiClusterService dependencies are ready
-	// on one or more matching clusters.
+	// MultiClusterServiceDependencyCheckFailedReason signals that an unexpected error prevented
+	// this MultiClusterService/NamespacedMultiClusterService from determining whether its
+	// MultiClusterService/NamespacedMultiClusterService dependencies are ready on one or more matching clusters.
 	MultiClusterServiceDependencyCheckFailedReason = "MultiClusterServiceDependencyCheckFailed"
 )
 

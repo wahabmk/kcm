@@ -117,10 +117,11 @@ func (r *MultiClusterServiceCommonReconciler) reconcileUpdate(ctx context.Contex
 
 	l := ctrl.LoggerFrom(ctx)
 
+	var isNamespacedMCS bool
 	mcsKind := kcmv1.MultiClusterServiceKind
 	finalizer := kcmv1.MultiClusterServiceFinalizer
 	indexKey := kcmv1.ServiceSetMultiClusterServiceIndexKey
-	if _, ok := mcs.(*kcmv1.NamespacedMultiClusterService); ok {
+	if _, isNamespacedMCS = mcs.(*kcmv1.NamespacedMultiClusterService); isNamespacedMCS {
 		finalizer = kcmv1.NamespacedMultiClusterServiceFinalizer
 		mcsKind = kcmv1.NamespacedMultiClusterServiceKind
 		indexKey = kcmv1.ServiceSetNamespacedMultiClusterServiceIndexKey
@@ -189,7 +190,12 @@ func (r *MultiClusterServiceCommonReconciler) reconcileUpdate(ctx context.Contex
 		upgradePaths []kcmv1.ServiceUpgradePaths
 		servicesErr  error
 	)
-	upgradePaths, servicesErr = serviceset.ServicesUpgradePaths(ctx, r.Client, mcs.GetMultiClusterServiceSpec().ServiceSpec.Services, r.SystemNamespace)
+
+	templateNamespace := r.SystemNamespace
+	if isNamespacedMCS {
+		templateNamespace = mcs.GetNamespace()
+	}
+	upgradePaths, servicesErr = serviceset.ServicesUpgradePaths(ctx, r.Client, mcs.GetMultiClusterServiceSpec().ServiceSpec.Services, templateNamespace)
 	mcs.GetMultiClusterServiceStatus().ServicesUpgradePaths = upgradePaths
 
 	return result, errors.Join(servicesErr, clustersErr)
@@ -1264,7 +1270,7 @@ func (r *MultiClusterServiceCommonReconciler) okToReconcileServiceSet(ctx contex
 			// getErr (a NotFound error) is deliberately not embedded here - it adds nothing
 			// actionable beyond "not yet created" and would make this entry's size depend on the
 			// underlying API error's formatting.
-			blockingDeps = append(blockingDeps, dep.mcsKey.String()+" (ServiceSet not yet created)")
+			blockingDeps = append(blockingDeps, dep.mcs.GetFullname()+" (ServiceSet not yet created)")
 			continue
 		}
 		if getErr != nil {
@@ -1287,7 +1293,7 @@ func (r *MultiClusterServiceCommonReconciler) okToReconcileServiceSet(ctx contex
 
 		if deployed != len(depSpec.ServiceSpec.Services) {
 			// Expected: depMCS's ServiceSet exists but hasn't finished deploying yet.
-			blockingDeps = append(blockingDeps, fmt.Sprintf("%s (%d/%d services deployed)", dep.mcsKey.String(), deployed, len(depSpec.ServiceSpec.Services)))
+			blockingDeps = append(blockingDeps, fmt.Sprintf("%s (%d/%d services deployed)", dep.mcs.GetFullname(), deployed, len(depSpec.ServiceSpec.Services)))
 			continue
 		}
 	}

@@ -25,29 +25,6 @@ const (
 	NamespacedMultiClusterServiceKind = "NamespacedMultiClusterService"
 )
 
-const (
-	// NamespacedMultiClusterServiceDependencyValidationCondition defines the condition
-	// of NamespacedMultiClusterService dependencies.
-	NamespacedMultiClusterServiceDependencyValidationCondition = "NamespacedMultiClusterServiceDependencyValidation"
-
-	// NamespacedMultiClusterServiceDependencyReadyCondition defines the condition of whether every
-	// NamespacedMultiClusterService this one depends on has finished deploying its services to
-	// every cluster this NamespacedMultiClusterService matches.
-	NamespacedMultiClusterServiceDependencyReadyCondition = "NamespacedMultiClusterServiceDependencyReady"
-)
-
-// Reasons are provided as utility, and not part of the declarative API.
-const (
-	// NamespacedMultiClusterServiceDependencyNotReadyReason signals that this NamespacedMultiClusterService
-	// is waiting for a NamespacedMultiClusterService it depends on to deploy its services to one or more
-	// matching clusters.
-	NamespacedMultiClusterServiceDependencyNotReadyReason = "NamespacedMultiClusterServiceDependencyNotReady"
-	// NamespacedMultiClusterServiceDependencyCheckFailedReason signals that an unexpected error prevented
-	// this NamespacedMultiClusterService from determining whether its NamespacedMultiClusterService
-	// dependencies are ready on one or more matching clusters.
-	NamespacedMultiClusterServiceDependencyCheckFailedReason = "NamespacedMultiClusterServiceDependencyCheckFailed"
-)
-
 // +kubebuilder:object:root=true
 // +kubebuilder:storageversion
 // +kubebuilder:subresource:status

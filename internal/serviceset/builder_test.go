@@ -62,7 +62,7 @@ func Test_Builder_Build_namespacedMultiClusterService(t *testing.T) {
 		require.False(t, got.Spec.Provider.SelfManagement)
 	})
 
-	t.Run("ClusterDeployment and NamespacedMultiClusterService both set: CD owns and supplies the provider config, but the NamespacedMultiClusterService reference is still recorded", func(t *testing.T) {
+	t.Run("ClusterDeployment and NamespacedMultiClusterService both set: CD owns, but the provider config comes from the NamespacedMultiClusterService", func(t *testing.T) {
 		t.Parallel()
 
 		cd := &kcmv1.ClusterDeployment{
@@ -92,9 +92,11 @@ func Test_Builder_Build_namespacedMultiClusterService(t *testing.T) {
 		require.Equal(t, kcmv1.ClusterDeploymentKind, got.OwnerReferences[0].Kind)
 		require.Equal(t, "my-cd", got.OwnerReferences[0].Name)
 
-		// The provider config follows whichever object owns the ServiceSet - see the TODO
-		// in Build about whether the MCS matching the CD should own it instead.
-		require.Equal(t, "cd-provider", got.Spec.Provider.Name)
+		// Ownership and provider config are selected independently: the ClusterDeployment owns the
+		// ServiceSet, but the NamespacedMultiClusterService that asked for these services supplies the
+		// provider config. Coupling the two would drop its settings and rewrite the immutable
+		// .spec.provider.name of an already existing ServiceSet.
+		require.Equal(t, "nmcs-provider", got.Spec.Provider.Name)
 
 		require.Equal(t, "my-cd", got.Spec.Cluster)
 		require.Equal(t, "team-a/my-nmcs", got.Spec.NamespacedMultiClusterService)
@@ -121,5 +123,85 @@ func Test_Builder_Build_namespacedMultiClusterService(t *testing.T) {
 		// SelfManagement is meaningful (not forced false) for a cluster-scoped MultiClusterService
 		// with no ClusterDeployment - this is the self-management ServiceSet.
 		require.True(t, got.Spec.Provider.SelfManagement)
+	})
+}
+
+// Test_Builder_Build_providerConfigPrecedence covers the combination that reaches Build on every
+// reconcile of a MultiClusterService matching a ClusterDeployment: both objects are set, and the
+// provider config has to come from the MCS rather than from the cluster it happens to target.
+func Test_Builder_Build_providerConfigPrecedence(t *testing.T) {
+	t.Parallel()
+
+	selector := &metav1.LabelSelector{}
+
+	t.Run("cluster-scoped MultiClusterService matching a ClusterDeployment: the provider name comes from the MCS", func(t *testing.T) {
+		t.Parallel()
+
+		cd := &kcmv1.ClusterDeployment{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "kcm-system", Name: "my-cd"},
+			Spec: kcmv1.ClusterDeploymentSpec{
+				ServiceSpec: kcmv1.ServiceSpec{
+					Provider: kcmv1.StateManagementProviderConfig{Name: "cd-provider"},
+				},
+			},
+		}
+		mcs := &kcmv1.MultiClusterService{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-mcs"},
+			Spec: kcmv1.MultiClusterServiceSpec{
+				ServiceSpec: kcmv1.ServiceSpec{
+					Provider: kcmv1.StateManagementProviderConfig{Name: "mcs-provider"},
+				},
+			},
+		}
+
+		sset := &kcmv1.ServiceSet{}
+		got, err := NewBuilder(cd, sset, selector).
+			WithMultiClusterServiceCommon(mcs).
+			Build()
+		require.NoError(t, err)
+
+		// The ClusterDeployment still owns the ServiceSet and is still recorded as its cluster.
+		require.Len(t, got.OwnerReferences, 1)
+		require.Equal(t, kcmv1.ClusterDeploymentKind, got.OwnerReferences[0].Kind)
+		require.Equal(t, "my-cd", got.Spec.Cluster)
+		require.Equal(t, "my-mcs", got.Spec.MultiClusterService)
+
+		// GetServiceSetWithOperation resolves the StateManagementProvider from the MCS spec and passes
+		// that provider's selector in as the ServiceSet labels, so the name written here has to match.
+		require.Equal(t, "mcs-provider", got.Spec.Provider.Name)
+
+		// Not the self-management ServiceSet: this one targets a ClusterDeployment.
+		require.False(t, got.Spec.Provider.SelfManagement)
+	})
+
+	t.Run("default provider: the deprecated service spec settings come from the MCS, not the ClusterDeployment", func(t *testing.T) {
+		t.Parallel()
+
+		// Neither side names a provider, so both resolve to the default one and only the marshalled
+		// config distinguishes them. This is the case that affects every user of the default provider,
+		// not just those running a custom StateManagementProvider.
+		cd := &kcmv1.ClusterDeployment{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "kcm-system", Name: "my-cd"},
+			Spec: kcmv1.ClusterDeploymentSpec{
+				ServiceSpec: kcmv1.ServiceSpec{SyncMode: "OneTime", Priority: 10},
+			},
+		}
+		mcs := &kcmv1.MultiClusterService{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-mcs"},
+			Spec: kcmv1.MultiClusterServiceSpec{
+				ServiceSpec: kcmv1.ServiceSpec{SyncMode: "ContinuousWithDriftDetection", Priority: 999},
+			},
+		}
+
+		sset := &kcmv1.ServiceSet{}
+		got, err := NewBuilder(cd, sset, selector).
+			WithMultiClusterServiceCommon(mcs).
+			Build()
+		require.NoError(t, err)
+
+		require.NotNil(t, got.Spec.Provider.Config)
+		require.JSONEq(t,
+			`{"syncMode":"ContinuousWithDriftDetection","priority":999}`,
+			string(got.Spec.Provider.Config.Raw))
 	})
 }

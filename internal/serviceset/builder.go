@@ -83,18 +83,33 @@ func (b *Builder) Build() (sset *kcmv1.ServiceSet, err error) {
 	// is claimed by the ClusterDeployment, which is why it is the first case in this switch statement.
 	//
 	// TODO: Should the ClusterDeployment be the owner if the MCS matching the CD is what is
-	// responsible for the creation of this ServiceSet?
+	// responsible for the creation of this ServiceSet? If we can safely have the MCS/NMCS claim ownership
+	// instead of the CD when both are not nil, then we won't need to have another switch statement
+	// below to select the provider config independently from ownership.
 	switch {
 	case b.ClusterDeployment != nil:
 		ownerReference = metav1.NewControllerRef(b.ClusterDeployment, kcmv1.GroupVersion.WithKind(kcmv1.ClusterDeploymentKind))
-		providerConfig, err = StateManagementProviderConfigFromServiceSpec(b.ClusterDeployment.Spec.ServiceSpec)
 	case !kcmv1.IsMCSNil(b.MultiClusterServiceCommon):
 		if isNamespacedMCS {
 			ownerReference = metav1.NewControllerRef(b.MultiClusterServiceCommon, kcmv1.GroupVersion.WithKind(kcmv1.NamespacedMultiClusterServiceKind))
 		} else {
 			ownerReference = metav1.NewControllerRef(b.MultiClusterServiceCommon, kcmv1.GroupVersion.WithKind(kcmv1.MultiClusterServiceKind))
 		}
+	}
+
+	// Ownership and provider config are selected independently. When a MultiClusterService or
+	// NamespacedMultiClusterService matches a ClusterDeployment both are set: the ClusterDeployment claims
+	// ownership above, but the provider config still comes from the MCS/NMCS that asked for these services.
+	// That is the spec GetServiceSetWithOperation already resolved the StateManagementProvider from, and whose
+	// selector supplies the labels applied below, so sourcing the config from the ClusterDeployment instead
+	// would label the ServiceSet for one provider while naming another. It would also drop the MCS/NMCS
+	// syncMode, priority, policyRefs and templateResourceRefs settings, and could rewrite
+	// .spec.provider.name, which is immutable once set, wedging updates to an existing ServiceSet.
+	switch {
+	case !kcmv1.IsMCSNil(b.MultiClusterServiceCommon):
 		providerConfig, err = StateManagementProviderConfigFromServiceSpec(b.MultiClusterServiceCommon.GetMultiClusterServiceSpec().ServiceSpec)
+	case b.ClusterDeployment != nil:
+		providerConfig, err = StateManagementProviderConfigFromServiceSpec(b.ClusterDeployment.Spec.ServiceSpec)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert ServiceSpec to ProviderConfig: %w", err)

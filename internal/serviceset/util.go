@@ -448,7 +448,7 @@ func FilterServiceDependencies(
 	return filtered, nil
 }
 
-// fetchServiceSet fetches the ServiceSet associated with the provided MutliClusterService/NamespacedMultiClusterService and ClusterDeployment.
+// fetchServiceSet fetches the ServiceSet associated with the provided MultiClusterService/NamespacedMultiClusterService and ClusterDeployment.
 func fetchServiceSet(ctx context.Context, c client.Client, systemNamespace string, mcs kcmv1.MultiClusterServiceCommon, cd *kcmv1.ClusterDeployment) (kcmv1.ServiceSet, error) {
 	cdName, cdNamespace := "", systemNamespace
 	if cd != nil {
