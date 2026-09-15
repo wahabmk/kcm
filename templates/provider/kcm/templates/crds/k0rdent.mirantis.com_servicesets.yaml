@@ -80,6 +80,7 @@ spec:
                   description: |-
                     namespacedMultiClusterService is the namespace/name of a NamespacedMultiClusterService.
                     Mutually exclusive with multiClusterService.
+                  maxLength: 512
                   minLength: 1
                   type: string
                 provider:

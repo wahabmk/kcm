@@ -40,11 +40,19 @@ const (
 // differ in scope. Should the two ever need to diverge, the shared types can be split then -
 // doing so changes neither object's serialized form nor its CRD schema.
 type NamespacedMultiClusterService struct { //nolint:govet // false-positive
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.TypeMeta `json:",inline"`
+	// +optional
 
-	Spec   MultiClusterServiceSpec   `json:"spec,omitempty"`
-	Status MultiClusterServiceStatus `json:"status,omitempty"`
+	// metadata contains the object metadata
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	// +optional
+
+	// spec defines the desired state
+	Spec MultiClusterServiceSpec `json:"spec,omitempty"`
+	// +optional
+
+	// status describes the observed state
+	Status MultiClusterServiceStatus `json:"status,omitempty,omitzero"`
 }
 
 // +kubebuilder:object:root=true

@@ -136,6 +136,7 @@ type ServiceSetSpec struct {
 	MultiClusterService string `json:"multiClusterService,omitempty"`
 	// +optional
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=512
 
 	// namespacedMultiClusterService is the namespace/name of a NamespacedMultiClusterService.
 	// Mutually exclusive with multiClusterService.

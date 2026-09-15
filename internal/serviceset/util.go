@@ -74,36 +74,6 @@ func ObjectKey(systemNamespace string, cd *kcmv1.ClusterDeployment, mcs kcmv1.Mu
 	}
 }
 
-// // ObjectKey generates a unique key for a ServiceSet given the input and returns it.
-// func ObjectKey(systemNamespace string, cd *kcmv1.ClusterDeployment, mcs client.ObjectKey) client.ObjectKey {
-// 	// We'll use the following pattern to build ServiceSet name:
-// 	// <ClusterDeploymentName>-<MultiClusterServiceNameHash>
-// 	// this will guarantee that the ServiceSet produced by MultiClusterService
-// 	// has name unique for each ClusterDeployment. If the clusterDeployment is nil,
-// 	// then serviceSet with "management" prefix will be created and system namespace.
-// 	var serviceSetNamespace, serviceSetName string
-
-// 	var mcsNameHash [32]byte
-// 	if mcs.Namespace == "" {
-// 		mcsNameHash = sha256.Sum256([]byte(mcs.Name))
-// 	} else {
-// 		mcsNameHash = sha256.Sum256([]byte(mcs.String()))
-// 	}
-
-// 	if cd == nil {
-// 		serviceSetName = fmt.Sprintf("management-%x", mcsNameHash[:4])
-// 		serviceSetNamespace = systemNamespace
-// 	} else {
-// 		serviceSetName = fmt.Sprintf("%s-%x", cd.Name, mcsNameHash[:4])
-// 		serviceSetNamespace = cd.Namespace
-// 	}
-
-// 	return client.ObjectKey{
-// 		Namespace: serviceSetNamespace,
-// 		Name:      serviceSetName,
-// 	}
-// }
-
 // ClusterReference returns the reference identifying the cluster a ServiceSet targets, including
 // Kind/APIVersion - not just namespace/name - so that the self-management pseudo-target (always a
 // SveltosCluster named mgmt/mgmt) can never be mistaken for a real, unrelated ClusterDeployment

@@ -62,9 +62,7 @@ spec:
             metadata:
               type: object
             spec:
-              description: |-
-                MultiClusterServiceSpec defines the desired state of a MultiClusterService or of its
-                namespace-scoped counterpart, NamespacedMultiClusterService - both share this type.
+              description: spec defines the desired state
               minProperties: 0
               properties:
                 clusterSelector:
@@ -876,9 +874,7 @@ spec:
                   type: object
               type: object
             status:
-              description: |-
-                MultiClusterServiceStatus defines the observed state of a MultiClusterService or of its
-                namespace-scoped counterpart, NamespacedMultiClusterService - both share this type.
+              description: status describes the observed state
               minProperties: 1
               properties:
                 conditions:
