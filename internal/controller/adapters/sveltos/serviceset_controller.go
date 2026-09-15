@@ -244,8 +244,7 @@ func (r *ServiceSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 	// then we'll collect the statuses of the services
-	err = r.collectServiceStatuses(ctx, rgnClient, serviceSet)
-	if err != nil {
+	if err := r.collectServiceStatuses(ctx, rgnClient, serviceSet); err != nil {
 		conditionOldState := apimeta.FindStatusCondition(clone.Status.Conditions, kcmv1.ServiceSetStatusesCollectedCondition)
 		conditionNewState := apimeta.FindStatusCondition(serviceSet.Status.Conditions, kcmv1.ServiceSetStatusesCollectedCondition)
 		// we'll emit ServiceSetCollectServiceStatusesFailedEvent warning
@@ -367,7 +366,7 @@ func (r *ServiceSetReconciler) verifyServiceStates(ctx context.Context, rgnClien
 	// with the spec value at the moment it confirms a deploy. The Helm
 	// path makes Status.Version mean "verified on cluster" (not "what spec
 	// says") — Kustomize / Resource still mirror spec eagerly in state.go.
-	specVersions := make(map[client.ObjectKey]*string, len(serviceSet.Spec.Services))
+	specVersions := make(map[client.ObjectKey]string, len(serviceSet.Spec.Services))
 	for i := range serviceSet.Spec.Services {
 		svc := &serviceSet.Spec.Services[i]
 		specVersions[client.ObjectKey{Namespace: svc.Namespace, Name: svc.Name}] = svc.Version
@@ -503,7 +502,7 @@ func (r *ServiceSetReconciler) reconcileDelete(ctx context.Context, rgnClient cl
 	}
 
 	var profile client.Object
-	if serviceSet.Spec.Provider.SelfManagement {
+	if serviceSet.IsSelfManaging() {
 		profile = new(addoncontrollerv1beta1.ClusterProfile)
 	} else {
 		profile = new(addoncontrollerv1beta1.Profile)
@@ -669,7 +668,7 @@ func (r *ServiceSetReconciler) ensureProfile(ctx context.Context, rgnClient clie
 		return fmt.Errorf("failed to build Profile: %w", err)
 	}
 
-	if serviceSet.Spec.Provider.SelfManagement {
+	if serviceSet.IsSelfManaging() {
 		if err = r.createOrUpdateClusterProfile(ctx, rgnClient, serviceSet, spec); err != nil {
 			return fmt.Errorf("failed to create or update ClusterProfile: %w", err)
 		}
@@ -806,7 +805,8 @@ func (r *ServiceSetReconciler) profileSpec(ctx context.Context, rgnClient client
 		clusterPolicyRefs           []addoncontrollerv1beta1.PolicyRef
 		err                         error
 	)
-	if serviceSet.Spec.Provider.SelfManagement {
+
+	if serviceSet.IsSelfManaging() {
 		clusterRef = corev1.ObjectReference{
 			Kind:       libsveltosv1beta1.SveltosClusterKind,
 			Namespace:  managementSveltosCluster,
@@ -928,7 +928,7 @@ func (r *ServiceSetReconciler) collectServiceStatuses(ctx context.Context, rgnCl
 		l.V(1).Info("Finished services status collection", "duration", time.Since(start))
 	}(initialConditionStatus)
 
-	if serviceSet.Spec.Provider.SelfManagement {
+	if serviceSet.IsSelfManaging() {
 		clusterProfile := new(addoncontrollerv1beta1.ClusterProfile)
 		key := client.ObjectKeyFromObject(serviceSet)
 		if err := rgnClient.Get(ctx, key, clusterProfile); err != nil {
@@ -1090,8 +1090,8 @@ func getHelmCharts(ctx context.Context, c client.Client, serviceSet *kcmv1.Servi
 			return nil, err
 		}
 
-		if svc.HelmAction != nil {
-			helmChart.HelmChartAction = addoncontrollerv1beta1.HelmChartAction(*svc.HelmAction)
+		if svc.HelmAction != "" {
+			helmChart.HelmChartAction = addoncontrollerv1beta1.HelmChartAction(svc.HelmAction)
 		}
 
 		helmCharts = append(helmCharts, helmChart)
@@ -1533,8 +1533,8 @@ func convertHelmOptions(options *kcmv1.ServiceHelmOptions) *addoncontrollerv1bet
 		toReturn.EnableClientCache = *options.EnableClientCache
 	}
 
-	if options.Description != nil {
-		toReturn.Description = *options.Description
+	if options.Description != "" {
+		toReturn.Description = options.Description
 	}
 
 	if options.Replace != nil { //nolint:staticcheck // required for backwards compatibility
@@ -1878,7 +1878,7 @@ func resolveChildClient(
 	rgnClient client.Client,
 	serviceSet *kcmv1.ServiceSet,
 ) (client.Client, error) {
-	if serviceSet.Spec.Provider.SelfManagement {
+	if serviceSet.IsSelfManaging() {
 		return cl, nil
 	}
 
@@ -1905,7 +1905,7 @@ func resolveChildClient(
 }
 
 func clusterReference(serviceSet *kcmv1.ServiceSet) *corev1.ObjectReference {
-	if serviceSet.Spec.Provider.SelfManagement {
+	if serviceSet.IsSelfManaging() {
 		return serviceset.SelfManagementClusterReference()
 	}
 	return &corev1.ObjectReference{

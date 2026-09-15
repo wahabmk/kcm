@@ -66,11 +66,19 @@ jobs:
           fi
 
       - name: Setup Go
+        id: setup-go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: '**/go.sum'
+
+      - name: Restore kube-api-linter
+        id: cache-kube-api-linter
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: bin/golangci-lint-kube-api-linter
+          key: kube-api-linter-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('.custom-gcl.yml') }}
 
       - name: Verify code style
         run: |
@@ -89,6 +97,13 @@ jobs:
           version: v2.12.2
           args: --config=.golangci.yml --timeout 5m ./...
 
+      - name: Build kube-api-linter
+        if: steps.cache-kube-api-linter.outputs.cache-hit != 'true'
+        run: make kube-api-linter
+
+      - name: Lint Kubernetes APIs
+        run: make lint-kube-api
+
       - name: Verify generated files are up-to-date
         env:
           BASE_COMMIT: "origin/${{ github.event.pull_request.base.ref }}"
@@ -106,6 +121,38 @@ jobs:
         env:
           BASE_COMMIT: "origin/${{ github.event.pull_request.base.ref }}"
         run: make test
+
+      - name: Show coverage report
+        run: go tool cover -func=cover.out
+
+      - name: Upload coverage profile
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cover-profile-${{ github.run_id }}
+          path: cover.out
+          # a build failure leaves no cover.out; stay quiet instead of warning
+          # on top of the failure that actually matters
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Enforce coverage gate
+        run: |
+          set -euo pipefail
+          # test/ packages (e2e suites, fixture/object builders, test/scheme, test/util) are
+          # test-only scaffolding with no hand-written logic to cover, so they are excluded
+          # from the gate. Ratchet this floor up as further work lands.
+          COVER_FLOOR=55.5
+
+          awk 'NR==1 { print; next } $0 !~ /^github.com\/K0rdent\/kcm\/test\// ' cover.out > gated-cover.out
+
+          COVERAGE=$(go tool cover -func=gated-cover.out | tail -1 | awk '{print substr($3, 1, length($3)-1)}')
+          echo "Coverage (excluding test/ scaffolding): ${COVERAGE}% (floor: ${COVER_FLOOR}%)"
+
+          if awk -v cov="$COVERAGE" -v floor="$COVER_FLOOR" 'BEGIN { exit !(cov+0 < floor+0) }'; then
+            echo "::error::Coverage ${COVERAGE}% is below the ${COVER_FLOOR}% floor"
+            exit 1
+          fi
 
       - name: Compute outputs
         id: vars

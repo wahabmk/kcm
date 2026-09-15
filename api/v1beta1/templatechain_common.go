@@ -17,8 +17,9 @@ package v1beta1
 import (
 	"fmt"
 	"slices"
-	"sort"
 )
+
+// +kubebuilder:validation:MinProperties=0
 
 // TemplateChainSpec defines the desired state of *TemplateChain
 type TemplateChainSpec struct {
@@ -26,34 +27,56 @@ type TemplateChainSpec struct {
 	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=name
+	// +optional
+	// +kubebuilder:validation:MinItems=0
 
-	// SupportedTemplates is the list of supported Templates definitions and all available upgrade sequences for it.
+	// supportedTemplates is the list of supported Templates definitions and all available upgrade sequences for it.
 	SupportedTemplates []SupportedTemplate `json:"supportedTemplates,omitempty"`
 }
 
+// +kubebuilder:validation:MinProperties=1
+
 // TemplateChainStatus defines the observed state of *TemplateChain
 type TemplateChainStatus struct {
-	// ValidationError provides information regarding issues encountered during templatechain validation.
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+
+	// validationError provides information regarding issues encountered during templatechain validation.
 	ValidationError string `json:"validationError,omitempty"`
-	// Valid indicates whether the chain is valid and can be considered when calculating available
+	// +optional
+	// +default=false
+
+	// valid indicates whether the chain is valid and can be considered when calculating available
 	// upgrade paths.
 	Valid bool `json:"valid,omitempty"`
 }
 
 // SupportedTemplate is the supported Template definition and all available upgrade sequences for it
 type SupportedTemplate struct {
-	// Name is the name of the Template.
-	Name string `json:"name"`
-	// AvailableUpgrades is the list of available upgrades for the specified Template.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+
+	// name is the name of the Template.
+	Name string `json:"name,omitempty"`
+	// +listType=atomic
+	// +optional
+	// +kubebuilder:validation:MinItems=0
+
+	// availableUpgrades is the list of available upgrades for the specified Template.
 	AvailableUpgrades []AvailableUpgrade `json:"availableUpgrades,omitempty"`
 }
 
 // AvailableUpgrade is the definition of the available upgrade for the Template
 type AvailableUpgrade struct {
-	// Name is the name of the Template to which the upgrade is available.
-	Name string `json:"name"`
+	// +required
+	// +kubebuilder:validation:MinLength=1
 
-	// Version is the version of the Template to which the upgrade is available.
+	// name is the name of the Template to which the upgrade is available.
+	Name string `json:"name,omitempty"`
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+
+	// version is the version of the Template to which the upgrade is available.
 	Version string `json:"version,omitempty"`
 }
 
@@ -149,7 +172,10 @@ func (s *TemplateChainSpec) findAllUpgradePaths(templateName string) ([][]Availa
 	return result, nil
 }
 
-// UpgradePaths returns shortest upgrade paths for the given template.
+// UpgradePaths returns one route per reachable destination for the given template,
+// hops listed in the order they must be applied. Where several routes lead to the
+// same destination the longest one is kept, so no hop is shortcut past.
+// A hop's Version falls back to its template name, so it is not always a semver.
 func (s *TemplateChainSpec) UpgradePaths(templateName string) ([]UpgradePath, error) {
 	allPaths, err := s.findAllUpgradePaths(templateName)
 	if err != nil {
@@ -173,7 +199,9 @@ func (s *TemplateChainSpec) UpgradePaths(templateName string) ([]UpgradePath, er
 		}
 	}
 
-	// Convert map back to slice
+	// Route order is hop order, so it is kept as-is: sorting by version string
+	// reorders hops wrongly ("1.10.0" precedes "1.9.0") and means nothing for the
+	// name fallback below.
 	result := make([]UpgradePath, 0, len(uniquePaths))
 	for _, path := range uniquePaths {
 		for i := range path {
@@ -181,9 +209,6 @@ func (s *TemplateChainSpec) UpgradePaths(templateName string) ([]UpgradePath, er
 				path[i].Version = path[i].Name
 			}
 		}
-		sort.Slice(path, func(i, j int) bool {
-			return path[i].Version < path[j].Version
-		})
 		result = append(result, UpgradePath{Versions: path})
 	}
 

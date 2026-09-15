@@ -118,65 +118,105 @@ const (
 	ServiceSetOperationNone   ServiceSetOperation = "none"
 )
 
+// +kubebuilder:validation:XValidation:rule="!(has(self.multiClusterService) && self.multiClusterService != '' && has(self.namespacedMultiClusterService) && self.namespacedMultiClusterService != '')",message="only one of spec.multiClusterService or spec.namespacedMultiClusterService can be set"
+
 // ServiceSetSpec defines the desired state of ServiceSet
 type ServiceSetSpec struct {
-	// Cluster is the name of the ClusterDeployment
+	// +required
+	// +kubebuilder:validation:MinLength=0
+
+	// cluster is the name of the ClusterDeployment. Empty value means self-managed cluster.
 	Cluster string `json:"cluster"`
+	// +optional
+	// +kubebuilder:validation:MinLength=1
 
-	// MultiClusterService is the name of the MultiClusterService
+	// multiClusterService is the name of the MultiClusterService.
+	// Mutually exclusive with namespacedMultiClusterService: a ServiceSet is produced by
+	// at most one of the two, since they are distinct objects with distinct scopes.
 	MultiClusterService string `json:"multiClusterService,omitempty"`
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=512
 
-	// Provider is the definition of the provider to use to deploy services defined in the ServiceSet.
-	Provider StateManagementProviderConfig `json:"provider"`
+	// namespacedMultiClusterService is the namespace/name of a NamespacedMultiClusterService.
+	// Mutually exclusive with multiClusterService.
+	NamespacedMultiClusterService string `json:"namespacedMultiClusterService,omitempty"`
+	// +required
 
-	// Services is the list of services to deploy.
+	// provider is the definition of the provider to use to deploy services defined in the ServiceSet.
+	Provider StateManagementProviderConfig `json:"provider,omitempty,omitzero"`
+	// +listType=atomic
+	// +optional
+	// +kubebuilder:validation:MinItems=0
+
+	// services is the list of services to deploy.
 	Services []ServiceWithValues `json:"services,omitempty"`
 }
 
+// +kubebuilder:validation:MinProperties=1
+
 // StateManagementProviderConfig contains all the spec related to the state management provider.
 type StateManagementProviderConfig struct {
-	// Config is the provider-specific configuration applied to the produced objects.
+	// +optional
+
+	// config is the provider-specific configuration applied to the produced objects.
 	Config *apiextv1.JSON `json:"config,omitempty"`
-
 	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="Provider name is immutable once set"
+	// +optional
+	// +kubebuilder:validation:MinLength=1
 
-	// Name is the name of the [StateManagementProvider] object.
+	// name is the name of the [StateManagementProvider] object.
 	Name string `json:"name,omitempty"`
+	// +optional
 
-	// SelfManagement flag defines whether resources must be deployed to the management cluster itself.
-	// This field is ignored if set for ClusterDeployment.
+	// selfManagement flag defines whether resources must be deployed to the management cluster itself.
+	// This field is ignored if set for ClusterDeployment or NamespacedMultiClusterService.
 	SelfManagement bool `json:"selfManagement,omitempty"`
 }
 
 type ServiceWithValues struct {
-	// HelmOptions are the options to be passed to the provider for helm installation or updates
-	HelmOptions *ServiceHelmOptions `json:"helmOptions,omitempty"`
-
 	// +optional
 
-	// Version is the version of the service.
-	Version *string `json:"version,omitempty"`
+	// helmOptions are the options to be passed to the provider for helm installation or updates
+	HelmOptions *ServiceHelmOptions `json:"helmOptions,omitempty,omitzero"`
+	// +optional
+	// +kubebuilder:validation:MinLength=1
 
+	// version is the version of the service.
+	Version string `json:"version,omitempty"`
 	// +kubebuilder:validation:Enum:=Install;Uninstall
+	// +optional
 
-	// HelmChartAction specifies action on an helm chart
-	HelmAction *string `json:"helmAction,omitempty"`
+	// helmAction specifies the action on a Helm chart
+	HelmAction string `json:"helmAction,omitempty"`
+	// +required
+	// +kubebuilder:validation:MinLength=1
 
-	// Name is the name of the service. If the ServiceTemplate is backed by Helm chart,
+	// name is the name of the service. If the ServiceTemplate is backed by Helm chart,
 	// then the name is the name of the Helm release.
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
+	// +required
+	// +kubebuilder:validation:MinLength=0
 
-	// Namespace is the namespace where the service is deployed. If the ServiceTemplate
+	// namespace is the namespace where the service is deployed. If the ServiceTemplate
 	// is backed by Helm chart, then the namespace is the namespace where the Helm release is deployed.
+	// Empty value means default namespace.
 	Namespace string `json:"namespace"`
+	// +required
+	// +kubebuilder:validation:MinLength=1
 
-	// Template is the name of the ServiceTemplate to use to deploy the service.
-	Template string `json:"template"`
+	// template is the name of the ServiceTemplate to use to deploy the service.
+	Template string `json:"template,omitempty"`
+	// +optional
+	// +kubebuilder:validation:MinLength=1
 
-	// Values is the values to pass to the ServiceTemplate.
+	// values is the values to pass to the ServiceTemplate.
 	Values string `json:"values,omitempty"`
+	// +listType=atomic
+	// +optional
+	// +kubebuilder:validation:MinItems=0
 
-	// ValuesFrom is the list of sources of the values to pass to the ServiceTemplate.
+	// valuesFrom is the list of sources of the values to pass to the ServiceTemplate.
 	ValuesFrom []ValuesFrom `json:"valuesFrom,omitempty"`
 }
 
@@ -184,92 +224,119 @@ type ServiceWithValues struct {
 // can be a ConfigMap or a Secret located in the same namespace as the ServiceSet.
 type ValuesFrom struct {
 	// +kubebuilder:validation:Enum=ConfigMap;Secret
+	// +required
 
-	// Kind is the kind of the source.
-	Kind string `json:"kind"`
+	// kind is the kind of the source.
+	Kind string `json:"kind,omitempty"`
+	// +required
+	// +kubebuilder:validation:MinLength=1
 
-	// Name is the name of the source.
-	Name string `json:"name"`
+	// name is the name of the source.
+	Name string `json:"name,omitempty"`
 }
+
+// +kubebuilder:validation:MinProperties=1
 
 // ServiceSetStatus defines the observed state of ServiceSet
 type ServiceSetStatus struct {
-	// Cluster contains [k8s.io/api/core/v1.ObjectReference] to the cluster object.
-	Cluster *corev1.ObjectReference `json:"cluster,omitempty"`
+	// +optional
 
-	// +patchMergeKey=type
-	// +patchStrategy=merge
+	// cluster contains [k8s.io/api/core/v1.ObjectReference] to the cluster object.
+	Cluster *corev1.ObjectReference `json:"cluster,omitempty"`
 	// +listType=map
 	// +listMapKey=type
+	// +optional
+	// +kubebuilder:validation:MinItems=0
 
-	// Conditions is a list of conditions for the ServiceSet
+	// conditions is a list of conditions for the ServiceSet
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:MinItems=0
 
-	// Services is a list of Service states in the ServiceSet
+	// services is a list of Service states in the ServiceSet
 	Services []ServiceState `json:"services,omitempty"`
+	// +optional
 
-	// +kubebuilder:default=false
+	// provider is the state of the provider
+	Provider ProviderState `json:"provider,omitempty,omitzero"`
 
-	// Deployed indicates whether all services were successfully deployed
-	Deployed bool `json:"deployed"`
+	// +optional
 
-	// Provider is the state of the provider
-	Provider ProviderState `json:"provider,omitempty"`
+	// deployed indicates whether all services were successfully deployed
+	Deployed bool `json:"deployed,omitempty"`
 }
+
+// +kubebuilder:validation:MinProperties=1
 
 // ProviderState is the state of the provider
 type ProviderState struct {
-	// Ready is true if the provider is ready
-	Ready bool `json:"ready,omitempty"`
+	// +optional
 
-	// Suspended is true if the provider is suspended
+	// ready is true if the provider is ready
+	Ready bool `json:"ready,omitempty"`
+	// +optional
+
+	// suspended is true if the provider is suspended
 	Suspended bool `json:"suspended,omitempty"`
 }
 
 // ServiceState is the state of a Service
 type ServiceState struct {
-	// LastStateTransitionTime is the time the State was last transitioned
-	LastStateTransitionTime *metav1.Time `json:"lastStateTransitionTime"`
+	// +required
 
+	// lastStateTransitionTime is the time the State was last transitioned
+	LastStateTransitionTime *metav1.Time `json:"lastStateTransitionTime,omitempty"`
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 
-	// Version is the version of the Service
-	Version *string `json:"version,omitempty"`
-
+	// version is the version of the Service
+	Version string `json:"version,omitempty"`
 	// +kubebuilder:validation:Enum=Helm;Kustomize;Resource
+	// +required
 
-	// Type is the type of the deployment method for the Service
-	Type ServiceType `json:"type"`
+	// type is the type of the deployment method for the Service
+	Type ServiceType `json:"type,omitempty"`
+	// +required
+	// +kubebuilder:validation:MinLength=1
 
-	// Name is the name of the Service
-	Name string `json:"name"`
+	// name is the name of the Service
+	Name string `json:"name,omitempty"`
+	// +required
+	// +kubebuilder:validation:MinLength=0
 
-	// Namespace is the namespace of the Service
+	// namespace is the namespace of the Service. Empty value means default namespace.
 	Namespace string `json:"namespace"`
+	// +required
+	// +kubebuilder:validation:MinLength=1
 
-	// Template is the name of the ServiceTemplate used to deploy the Service
-	Template string `json:"template"`
-
-	// State is the state of the Service
+	// template is the name of the ServiceTemplate used to deploy the Service
+	Template string `json:"template,omitempty"`
 	// +kubebuilder:validation:Enum=Deployed;Provisioning;Failed;Pending;Deleting;Deleted
-	State string `json:"state"`
+	// +required
 
-	// FailureMessage is the reason why the Service failed to deploy
+	// state is the state of the Service
+	State string `json:"state,omitempty"`
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+
+	// failureMessage is the reason why the Service failed to deploy
 	FailureMessage string `json:"failureMessage,omitempty"`
+	// +optional
+	// +kubebuilder:validation:MinLength=1
 
-	// LastDeployedHash is the verifier's fingerprint of the provider-side
+	// lastDeployedHash is the verifier's fingerprint of the provider-side
 	// configuration this service was most recently confirmed Deployed at.
 	// Used to recognise that a progressing state reported by the provider is
 	// transient noise from an unrelated apply (rather than a real change to
 	// this service) and to promote back to Deployed safely.
 	LastDeployedHash string `json:"lastDeployedHash,omitempty"`
-
-	// +patchMergeKey=type
-	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=type
+	// +optional
+	// +kubebuilder:validation:MinItems=0
 
-	// Conditions is a list of conditions for the Service
+	// conditions is a list of conditions for the Service
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
@@ -284,11 +351,19 @@ type ServiceState struct {
 
 // ServiceSet is the Schema for the servicesets API
 type ServiceSet struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.TypeMeta `json:",inline"`
+	// +optional
 
-	Spec   ServiceSetSpec   `json:"spec,omitempty"`
-	Status ServiceSetStatus `json:"status,omitempty"`
+	// metadata contains the object metadata
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	// +required
+
+	// spec defines the desired state
+	Spec ServiceSetSpec `json:"spec,omitempty,omitzero"`
+	// +optional
+
+	// status describes the observed state
+	Status ServiceSetStatus `json:"status,omitempty,omitzero"`
 }
 
 // +kubebuilder:object:root=true
@@ -302,4 +377,17 @@ type ServiceSetList struct {
 
 func init() {
 	SchemeBuilder.Register(&ServiceSet{}, &ServiceSetList{})
+}
+
+// IsSelfManaging returns true if this ServiceSet is supposed to manage the mothership cluster.
+func (sset *ServiceSet) IsSelfManaging() bool {
+	switch {
+	case sset.Spec.MultiClusterService != "":
+		return sset.Spec.Provider.SelfManagement
+	// We ignore selfManagement for NamespacedMultiClusterService.
+	case sset.Spec.NamespacedMultiClusterService != "":
+		return false
+	default:
+		return false
+	}
 }

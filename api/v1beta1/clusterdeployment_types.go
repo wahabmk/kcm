@@ -55,6 +55,9 @@ const (
 	// ClusterAuthenticationReadyCondition indicates whether the referenced [ClusterAuthentication] object exists
 	// and ready.
 	ClusterAuthenticationReadyCondition = "ClusterAuthenticationReady"
+	// RBACPolicyReadyCondition indicates whether the referenced [RBACPolicy] object exists
+	// and ready.
+	RBACPolicyReadyCondition = "RBACPolicyReady"
 	// ClusterAuditPolicyReadyCondition indicates whether the referenced [ClusterAuditPolicy] object exists
 	// and ready.
 	ClusterAuditPolicyReadyCondition = "ClusterAuditPolicyReady"
@@ -94,88 +97,176 @@ const (
 	// CAPIClusterMissingReason indicates the underlying CAPI Cluster object is unexpectedly
 	// absent while the [ClusterDeployment] is still alive (e.g., it was deleted out-of-band).
 	CAPIClusterMissingReason = "CAPIClusterMissing"
+	// RBACPolicyPartiallyAppliedReason indicates some, or possibly all, of the referenced
+	// [RBACPolicy] bindings reached the child cluster while the sync as a whole did not succeed.
+	// The sync deliberately continues past a failing binding, so this is the common shape of an
+	// RBACPolicy failure and is worth telling apart from one that granted nothing at all.
+	// Whether anything is still live there is recorded by status.rbacPolicyGranted, not here.
+	RBACPolicyPartiallyAppliedReason = "RBACPolicyPartiallyApplied"
+	// RBACPolicyNotFoundReason indicates spec.rbacPolicy names an [RBACPolicy] that does not exist.
+	// Shared by the "never granted anything" and the "granted, now revoked" cases so that the
+	// condition settles instead of being rewritten on the reconcile following a revoke.
+	RBACPolicyNotFoundReason = "RBACPolicyNotFound"
 )
 
 // ClusterDeploymentSpec defines the desired state of ClusterDeployment
 type ClusterDeploymentSpec struct {
-	// Config allows to provide parameters for template customization.
+	// +optional
+
+	// config allows to provide parameters for template customization.
 	// If no Config provided, the field will be populated with the default values for
 	// the template and DryRun will be enabled.
 	Config *apiextv1.JSON `json:"config,omitempty"`
-	// +kubebuilder:default:=true
+	// +default=true
+	// +optional
 
-	// PropagateCredentials indicates whether credentials should be propagated
+	// propagateCredentials indicates whether credentials should be propagated
 	// for use by CCM (Cloud Controller Manager).
 	PropagateCredentials *bool `json:"propagateCredentials,omitempty"`
+	// +optional
 
+	// ipamClaim defines IP Address Management (IPAM) requirements for the cluster.
+	// It can either reference an existing IPAM claim or specify an inline claim.
+	IPAMClaim ClusterIPAMClaimType `json:"ipamClaim,omitempty,omitzero"`
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
+	// +required
 
-	// Template is a reference to a Template object located in the same namespace.
-	Template string `json:"template"`
-	// Name reference to the related [Credential] object located in the same namespace.
+	// template is a reference to a Template object located in the same namespace.
+	Template string `json:"template,omitempty"`
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+
+	// credential is the name of the related [Credential] object in the same namespace
 	Credential string `json:"credential,omitempty"`
-	// Name reference to the related [ClusterAuthentication] object.
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+
+	// clusterAuth is the name of the related [ClusterAuthentication] object
 	ClusterAuth string `json:"clusterAuth,omitempty"`
-	// DataSource is the name reference to the related [DataSource] object located in the same namespace.
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+
+	// dataSource is the name reference to the related [DataSource] object located in the same namespace.
 	DataSource string `json:"dataSource,omitempty"`
-	// AuditPolicy is the name reference to the related [ClusterAuditPolicy] object located in the same namespace
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+
+	// auditPolicy is the name reference to the related [ClusterAuditPolicy] object located in the same namespace
 	// containing audit policy configuration.
 	AuditPolicy string `json:"auditPolicy,omitempty"`
-	// IPAMClaim defines IP Address Management (IPAM) requirements for the cluster.
-	// It can either reference an existing IPAM claim or specify an inline claim.
-	IPAMClaim ClusterIPAMClaimType `json:"ipamClaim,omitempty"`
-	// ServiceSpec is spec related to deployment of services.
-	ServiceSpec ServiceSpec `json:"serviceSpec,omitempty"`
-	// DryRun specifies whether the template should be applied after validation or only validated.
-	DryRun bool `json:"dryRun,omitempty"`
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=256
 
-	// CleanupOnDeletion specifies whether potentially orphaned Services and PVCs
+	// rbacPolicy string is the name reference to the related [RBACPolicy] object located in the same namespace
+	// containing RBAC policy configuration.
+	RBACPolicy string `json:"rbacPolicy,omitempty"`
+	// +optional
+
+	// serviceSpec is spec related to deployment of services.
+	ServiceSpec ServiceSpec `json:"serviceSpec,omitempty"`
+	// +optional
+
+	// dryRun specifies whether the template should be applied after validation or only validated.
+	DryRun bool `json:"dryRun,omitempty"`
+	// +optional
+
+	// cleanupOnDeletion specifies whether potentially orphaned Services and PVCs
 	// should be removed during the object deletion.
 	// This is a best-effort cleanup, if there is no possibility to acquire
 	// a managed cluster's kubeconfig, the cleanup will NOT happen.
 	CleanupOnDeletion bool `json:"cleanupOnDeletion,omitempty"`
 }
 
+// +kubebuilder:validation:MinProperties=1
+
 // ClusterIPAMClaimType represents the IPAM claim configuration for a cluster deployment.
 // It allows referencing an existing claim or defining a new one inline.
 type ClusterIPAMClaimType struct {
-	// ClusterIPAMClaimSpec defines the inline IPAM claim specification if no reference is provided.
-	// This allows for dynamic IP address allocation during cluster provisioning.
-	ClusterIPAMClaimSpec *ClusterIPAMClaimSpec `json:"spec,omitempty"`
+	// +optional
 
-	// ClusterIPAMClaimRef is the name of an existing ClusterIPAMClaim resource to use.
+	// spec defines the inline IPAM claim specification if no reference is provided.
+	// This allows for dynamic IP address allocation during cluster provisioning.
+	ClusterIPAMClaimSpec *ClusterIPAMClaimSpec `json:"spec,omitempty,omitzero"`
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+
+	// ref is the name of an existing ClusterIPAMClaim resource to use.
 	ClusterIPAMClaimRef string `json:"ref,omitempty"`
 }
 
+// +kubebuilder:validation:MinProperties=1
+
 // ClusterDeploymentStatus defines the observed state of ClusterDeployment
 type ClusterDeploymentStatus struct {
-	// Services contains details for the state of services.
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:MinItems=0
+
+	// services contains details for the state of services.
 	Services []ServiceState `json:"services,omitempty"`
-	// ServicesUpgradePaths contains details for the state of services upgrade paths.
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:MinItems=0
+
+	// servicesUpgradePaths contains details for the state of services upgrade paths.
 	ServicesUpgradePaths []ServiceUpgradePaths `json:"servicesUpgradePaths,omitempty"`
-	// Currently compatible exact Kubernetes version of the cluster. Being set only if
+
+	// +optional
+
+	// rbacPolicyGrant reports whether ClusterRoles and ClusterRoleBindings derived from the
+	// [RBACPolicy] named by spec.rbacPolicy may be live in this ClusterDeployment's child cluster.
+	// Empty means none are: either nothing was ever applied there, or everything that was has
+	// since been revoked. See [RBACPolicyGrantState].
+	RBACPolicyGrant RBACPolicyGrantState `json:"rbacPolicyGrant,omitempty"`
+
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+
+	// k8sVersion is the currently compatible exact Kubernetes version of the cluster. Being set only if
 	// provided by the corresponding ClusterTemplate.
 	KubernetesVersion string `json:"k8sVersion,omitempty"`
-	// Region shows the region the [ClusterDeployment] targets.
-	Region string `json:"region,omitempty"`
+	// +optional
+	// +kubebuilder:validation:MinLength=1
 
-	// +patchMergeKey=type
-	// +patchStrategy=merge
+	// region shows the region the [ClusterDeployment] targets.
+	Region string `json:"region,omitempty"`
 	// +listType=map
 	// +listMapKey=type
+	// +optional
+	// +kubebuilder:validation:MinItems=0
 
-	// Conditions contains details for the current state of the ClusterDeployment.
+	// conditions contains details for the current state of the ClusterDeployment.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:MinItems=0
 
-	// AvailableUpgrades is the list of ClusterTemplate names to which
+	// availableUpgrades is the list of ClusterTemplate names to which
 	// this cluster can be upgraded. It can be an empty array, which means no upgrades are
 	// available.
 	AvailableUpgrades []string `json:"availableUpgrades,omitempty"`
+	// +optional
+	// +kubebuilder:validation:Minimum=1
 
-	// ObservedGeneration is the last observed generation.
+	// observedGeneration is the last observed generation.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
+
+// RBACPolicyGrantState reports what the RBAC operator may have left in a ClusterDeployment's child
+// cluster. It is set before the first write there and cleared only once everything the operator
+// created is gone, and it is the sole record of those objects once the [RBACPolicy] is deleted,
+// which is exactly when they have to be revoked.
+//
+// +kubebuilder:validation:Enum=Granted
+type RBACPolicyGrantState string
+
+// RBACPolicyGrantedState indicates ClusterRoles and ClusterRoleBindings this operator created may
+// still be live in the child cluster, so a revoke has to prune them. An over-approximation: it is
+// set before the bindings are applied, so it holds even for a sync that created nothing.
+const RBACPolicyGrantedState RBACPolicyGrantState = "Granted"
 
 // +kubebuilder:object:root=true
 // +kubebuilder:storageversion
@@ -190,11 +281,19 @@ type ClusterDeploymentStatus struct {
 
 // ClusterDeployment is the Schema for the ClusterDeployments API
 type ClusterDeployment struct { //nolint:govet // false-positive
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.TypeMeta `json:",inline"`
+	// +optional
 
-	Spec   ClusterDeploymentSpec   `json:"spec"`
-	Status ClusterDeploymentStatus `json:"status,omitempty"`
+	// metadata contains the object metadata
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	// +required
+
+	// spec defines the desired state
+	Spec ClusterDeploymentSpec `json:"spec,omitzero"`
+	// +optional
+
+	// status describes the observed state
+	Status ClusterDeploymentStatus `json:"status,omitempty,omitzero"`
 }
 
 // HelmValues returns a non-nil map of Helm values from [ClusterDeployment.Spec] Config field.

@@ -51,7 +51,7 @@ func SelfManagementClusterReference() *corev1.ObjectReference {
 }
 
 // ObjectKey generates a unique key for a ServiceSet given the input and returns it.
-func ObjectKey(systemNamespace string, cd *kcmv1.ClusterDeployment, mcs *kcmv1.MultiClusterService) client.ObjectKey {
+func ObjectKey(systemNamespace string, cd *kcmv1.ClusterDeployment, mcs kcmv1.MultiClusterServiceCommon) client.ObjectKey {
 	// We'll use the following pattern to build ServiceSet name:
 	// <ClusterDeploymentName>-<MultiClusterServiceNameHash>
 	// this will guarantee that the ServiceSet produced by MultiClusterService
@@ -59,7 +59,7 @@ func ObjectKey(systemNamespace string, cd *kcmv1.ClusterDeployment, mcs *kcmv1.M
 	// then serviceSet with "management" prefix will be created and system namespace.
 	var serviceSetNamespace, serviceSetName string
 
-	mcsNameHash := sha256.Sum256([]byte(mcs.Name))
+	mcsNameHash := sha256.Sum256([]byte(mcs.GetFullname()))
 	if cd == nil {
 		serviceSetName = fmt.Sprintf("management-%x", mcsNameHash[:4])
 		serviceSetNamespace = systemNamespace
@@ -140,7 +140,7 @@ func fillServiceVersions(ctx context.Context, c client.Client, namespace string,
 
 func fillServiceWithValueVersions(ctx context.Context, c client.Client, namespace string, services []*kcmv1.ServiceWithValues) error {
 	for _, svc := range services {
-		if (svc.Version == nil || *svc.Version == "") && svc.Template != "" {
+		if svc.Version == "" && svc.Template != "" {
 			template := kcmv1.ServiceTemplate{}
 			if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: svc.Template}, &template); err != nil {
 				return fmt.Errorf("failed to fetch Template %s/%s: %w", namespace, svc.Template, err)
@@ -152,9 +152,9 @@ func fillServiceWithValueVersions(ctx context.Context, c client.Client, namespac
 			}
 
 			if version == "" {
-				svc.Version = new(svc.Template)
+				svc.Version = svc.Template
 			} else {
-				svc.Version = new(version)
+				svc.Version = version
 			}
 		}
 	}
@@ -285,7 +285,7 @@ func FilterServiceDependencies(
 	ctx context.Context,
 	c client.Client,
 	systemNamespace string,
-	mcs *kcmv1.MultiClusterService,
+	mcs kcmv1.MultiClusterServiceCommon,
 	cd *kcmv1.ClusterDeployment,
 	desiredServices []kcmv1.Service,
 ) ([]kcmv1.Service, error) {
@@ -332,20 +332,14 @@ func FilterServiceDependencies(
 	statusVersion := make(map[client.ObjectKey]string)
 	statusState := make(map[client.ObjectKey]string)
 	for _, svc := range sset.Spec.Services {
-		v := ""
-		if svc.Version != nil {
-			v = *svc.Version
-		}
+		v := svc.Version
 		if v == "" {
 			v = svc.Template
 		}
 		specVersion[ServiceKey(svc.Namespace, svc.Name)] = v
 	}
 	for _, svc := range sset.Status.Services {
-		v := ""
-		if svc.Version != nil {
-			v = *svc.Version
-		}
+		v := svc.Version
 		if v == "" {
 			v = svc.Template
 		}
@@ -424,18 +418,21 @@ func FilterServiceDependencies(
 	return filtered, nil
 }
 
-// fetchServiceSet fetches the ServiceSet associated with the provided mcs and cd.
-func fetchServiceSet(ctx context.Context, c client.Client, systemNamespace string, mcs *kcmv1.MultiClusterService, cd *kcmv1.ClusterDeployment) (kcmv1.ServiceSet, error) {
-	mcsName := ""
-	if mcs != nil {
-		mcsName = mcs.GetName()
-	}
-
-	cdName := ""
-	namespace := systemNamespace
+// fetchServiceSet fetches the ServiceSet associated with the provided MultiClusterService/NamespacedMultiClusterService and ClusterDeployment.
+func fetchServiceSet(ctx context.Context, c client.Client, systemNamespace string, mcs kcmv1.MultiClusterServiceCommon, cd *kcmv1.ClusterDeployment) (kcmv1.ServiceSet, error) {
+	cdName, cdNamespace := "", systemNamespace
 	if cd != nil {
 		cdName = cd.GetName()
-		namespace = cd.GetNamespace()
+		cdNamespace = cd.GetNamespace()
+	}
+
+	_, isNamespacedMCS := mcs.(*kcmv1.NamespacedMultiClusterService)
+
+	if !kcmv1.IsMCSNil(mcs) && isNamespacedMCS && mcs.GetNamespace() != cdNamespace {
+		// This is an error because:
+		// 1. A NamespacedMultiClusterService can only match a CD within its own namespace.
+		// 2. And it cannot create a self-managing ServiceSet.
+		return kcmv1.ServiceSet{}, fmt.Errorf("unexpected: the ClusterDeployment %s/%s and NamespacedMultiClusterService %s not in the same namespace", cdNamespace, cdName, mcs.GetFullname())
 	}
 
 	// Fetch serviceSet.
@@ -463,11 +460,24 @@ func fetchServiceSet(ctx context.Context, c client.Client, systemNamespace strin
 	if cdName != "" {
 		sel = fields.AndSelectors(sel, fields.OneTermEqualSelector(kcmv1.ServiceSetClusterIndexKey, cdName))
 	}
-	if mcsName != "" {
-		sel = fields.AndSelectors(sel, fields.OneTermEqualSelector(kcmv1.ServiceSetMultiClusterServiceIndexKey, mcsName))
+
+	if !kcmv1.IsMCSNil(mcs) {
+		indexKey := kcmv1.ServiceSetMultiClusterServiceIndexKey
+		if isNamespacedMCS {
+			indexKey = kcmv1.ServiceSetNamespacedMultiClusterServiceIndexKey
+		}
+		sel = fields.AndSelectors(sel, fields.OneTermEqualSelector(indexKey, mcs.GetFullname()))
 	}
-	if err := c.List(ctx, serviceSetList, client.InNamespace(namespace), client.MatchingFieldsSelector{Selector: sel}); err != nil {
+
+	// We can safely use cdNamespace here because we already checked if it
+	// matches the NamespacedMultiClusterService's namespace if mcs is namespaced.
+	if err := c.List(ctx, serviceSetList, client.InNamespace(cdNamespace), client.MatchingFieldsSelector{Selector: sel}); err != nil {
 		return kcmv1.ServiceSet{}, fmt.Errorf("failed to list ServiceSets: %w", err)
+	}
+
+	mcsName := ""
+	if !kcmv1.IsMCSNil(mcs) {
+		mcsName = mcs.GetName()
 	}
 
 	serviceSets := []kcmv1.ServiceSet{}
@@ -475,9 +485,9 @@ func fetchServiceSet(ctx context.Context, c client.Client, systemNamespace strin
 		/*
 			We can have the following cases:
 
-			case 1) cd == "" && mcs == "":
+			case 1) cd == "" && mc/nmcs == "":
 					This is impossible as there cannot be a ServiceSet with neither cd nor mcs set.
-			case 2) cd != "" && mcs == "":
+			case 2) cd != "" && mcs/nmcs == "":
 					This is a unique ServiceSet created by the ClusterDeployment Controller for the cd.
 					However, when querying the kube api service for this case, ALL ServiceSets that have
 					cd set are returned, which means the ServiceSets for all mcs matching the cd are also returned.
@@ -485,16 +495,16 @@ func fetchServiceSet(ctx context.Context, c client.Client, systemNamespace strin
 					This is a unique self-management ServiceSet created by the MultiClusterController for the mcs.
 					Here again ALL ServiceSets that have mcs set are returned even those belonging to any cd existing
 					in the system namespace.
-			case 4) cd != "" && mcs != "":
-					This is a unique Serviceset created by the MultiClusterController for mcs matching cd.
+			case 4) cd != "" && mcs/nmcs != "":
+					This is a unique Serviceset created by the MultiClusterController/NamespacedMultiClusterController for mcs/nmcs matching cd.
 
 			So in all cases except cases 2 and 3, a max of 1 ServiceSet is returned.
 		*/
-		if cdName != "" && mcsName == "" && sset.Spec.MultiClusterService != "" {
+		if cdName != "" && mcsName == "" && (sset.Spec.MultiClusterService != "" || sset.Spec.NamespacedMultiClusterService != "") {
 			// Handle case 2. We need the ServiceSet which is created only for the cd.
 			// So if cd is set and mcs is not (case 2) then we will ignore all ServiceSets
-			// in the returned list which have its `.spec.multiClusterService` set, so the
-			// only ServiceSet which will remain is the one created specifically for the cd.
+			// in the returned list which have its `.spec.multiClusterService` or `spec.namespacedMultiClusterService` set,
+			// so the only ServiceSet which will remain is the one created specifically for the cd.
 			continue
 		}
 		if cdName == "" && mcsName != "" && sset.Spec.Cluster != "" {
@@ -510,12 +520,17 @@ func fetchServiceSet(ctx context.Context, c client.Client, systemNamespace strin
 	}
 
 	if len(serviceSets) > 1 {
-		return kcmv1.ServiceSet{}, fmt.Errorf("expected 1 ServiceSet for cd=%s/%s && mcs=%s, got %d", namespace, cdName, mcsName, len(serviceSets))
+		mcsFullname := ""
+		if !kcmv1.IsMCSNil(mcs) {
+			mcsFullname = mcs.GetFullname()
+		}
+		return kcmv1.ServiceSet{}, fmt.Errorf("expected 1 ServiceSet for cd=%s/%s && mcs=%s, got %d", cdNamespace, cdName, mcsFullname, len(serviceSets))
 	}
 	if len(serviceSets) == 0 {
 		// We want 0 ServiceSets to be a no-op.
 		return kcmv1.ServiceSet{}, nil
 	}
+
 	return serviceSets[0], nil
 }
 
@@ -528,7 +543,7 @@ func makeService(s kcmv1.Service, version, template string) kcmv1.ServiceWithVal
 		// This will lead to persistent discrepancy between service definitions and
 		// lead to continuous serviceSet updates.
 		Namespace:   effectiveNamespace(s.Namespace),
-		Version:     new(version),
+		Version:     version,
 		Template:    template,
 		Values:      s.Values,
 		ValuesFrom:  s.ValuesFrom,
@@ -546,8 +561,7 @@ func appendIfNotPresent(
 	exists := slices.ContainsFunc(services, func(c kcmv1.ServiceWithValues) bool {
 		return c.Name == s.Name &&
 			c.Namespace == serviceNamespace &&
-			c.Version != nil &&
-			*c.Version == minimumUpgrade.Version
+			c.Version == minimumUpgrade.Version
 	})
 
 	if !exists {
@@ -556,52 +570,75 @@ func appendIfNotPresent(
 	return services
 }
 
-// minimumUpgradeStep returns the smallest available upgrade version for the named
-// service that falls within (currentVersion, desiredVersion]. Only upgrade paths
-// that actually contain the desired version are considered, avoiding dead-end branches.
-// Returns a zero-value AvailableUpgrade if no matching step is found in upgradePaths.
-func minimumUpgradeStep(upgradePaths []kcmv1.ServiceUpgradePaths, name, namespace, currentVersion, desiredVersion string) kcmv1.AvailableUpgrade {
-	current, err := semver.NewVersion(currentVersion)
-	if err != nil {
-		return kcmv1.AvailableUpgrade{}
-	}
-	desired, err := semver.NewVersion(desiredVersion)
-	if err != nil {
-		return kcmv1.AvailableUpgrade{}
-	}
-
-	var best kcmv1.AvailableUpgrade
-	var bestNext *semver.Version
+// nextUpgradeStep returns the next hop towards desiredTemplate, or a zero value if
+// no route reaches it.
+//
+// Routes are walked positionally and matched on template names rather than compared
+// by version: a chain may omit .version on its available upgrades, leaving the
+// version a copy of the template name, and comparing versions then found no step at
+// all and jumped straight to the desired template (#3042). Only routes that reach
+// desiredTemplate count, and the longest one wins, so dead-end branches are skipped
+// and no hop is shortcut past (#2693).
+func nextUpgradeStep(
+	upgradePaths []kcmv1.ServiceUpgradePaths,
+	name, namespace, currentTemplate, desiredTemplate string,
+) kcmv1.AvailableUpgrade {
+	var (
+		best    kcmv1.AvailableUpgrade
+		bestLen int
+	)
 
 	for _, path := range upgradePaths {
 		if path.Name != name || effectiveNamespace(path.Namespace) != effectiveNamespace(namespace) {
 			continue
 		}
-		for _, upgrade := range path.AvailableUpgrades {
-			// Only consider upgrade paths that can actually reach the desired version.
-			if !slices.ContainsFunc(upgrade.Versions, func(u kcmv1.AvailableUpgrade) bool {
-				v, err := semver.NewVersion(u.Version)
-				return err == nil && v.Equal(desired)
-			}) {
-				continue
+		// A route computed for another template cannot be positioned against this one.
+		if path.Template != "" && currentTemplate != "" && path.Template != currentTemplate {
+			continue
+		}
+		for _, route := range path.AvailableUpgrades {
+			target := slices.IndexFunc(route.Versions, func(u kcmv1.AvailableUpgrade) bool {
+				return u.Name == desiredTemplate
+			})
+			if target < 0 {
+				continue // this route cannot reach the desired template
 			}
 
-			for _, u := range upgrade.Versions {
-				v, err := semver.NewVersion(u.Version)
-				if err != nil {
-					continue
-				}
-				if v.Compare(current) > 0 && v.Compare(desired) <= 0 {
-					if bestNext == nil || v.Compare(bestNext) < 0 {
-						best = u
-						bestNext = v
-					}
-				}
+			// Hops up to and including the one the service already sits at are behind us.
+			next := 0
+			if at := slices.IndexFunc(route.Versions[:target], func(u kcmv1.AvailableUpgrade) bool {
+				return u.Name == currentTemplate
+			}); at >= 0 {
+				next = at + 1
+			}
+
+			if target+1 > bestLen {
+				best, bestLen = route.Versions[next], target+1
 			}
 		}
 	}
 
 	return best
+}
+
+// isDowngrade reports whether desiredVersion is strictly older than currentVersion.
+// A ServiceTemplateChain only describes upgrades, so a downgrade is not gated by it.
+//
+// The comparison is semantic: lexicographically "1.10.0" sorts before "1.9.0", which
+// would read a real upgrade as a downgrade and let it past the chain gate. Either
+// version may legitimately not be a semver — ResolveServiceVersions falls back to the
+// ServiceTemplate name when the template carries no version — and then there is no
+// ordering to establish, so the chain decides.
+func isDowngrade(desiredVersion, currentVersion string) bool {
+	desired, err := semver.NewVersion(desiredVersion)
+	if err != nil {
+		return false
+	}
+	current, err := semver.NewVersion(currentVersion)
+	if err != nil {
+		return false
+	}
+	return desired.LessThan(current)
 }
 
 // ServicesToDeploy computes the target ServiceWithValues for each service in
@@ -616,6 +653,7 @@ func ServicesToDeploy(
 	desiredVersions := make(map[client.ObjectKey]string)
 	desiredTemplates := make(map[client.ObjectKey]string)
 	deployedVersions := make(map[client.ObjectKey]string)
+	storedTemplates := make(map[client.ObjectKey]string)
 	upgradeAvailable := make(map[client.ObjectKey]bool)
 
 	for _, s := range filteredServices {
@@ -643,18 +681,19 @@ func ServicesToDeploy(
 		}
 
 		desiredVersion := desiredVersions[key]
-		upgradeAvailable[key] = svc.Version != nil && desiredVersion < *svc.Version ||
-			desiredVersionInUpgradePaths(upgradePaths, svc, desiredVersion)
+		storedTemplates[key] = svc.Template
+		upgradeAvailable[key] = svc.Version != "" && isDowngrade(desiredVersion, svc.Version) ||
+			desiredTemplateInUpgradePaths(upgradePaths, svc, desiredTemplates[key], desiredVersion)
 
 		for _, state := range serviceSet.Status.Services {
 			if state.State == kcmv1.ServiceStateDeployed &&
 				effectiveNamespace(state.Namespace) == effectiveNamespace(svc.Namespace) &&
-				state.Name == svc.Name && state.Version != nil {
-				deployedVersions[key] = *state.Version
+				state.Name == svc.Name && state.Version != "" {
+				deployedVersions[key] = state.Version
 			}
 		}
 
-		if svc.Version == nil || *svc.Version == deployedVersions[key] {
+		if svc.Version == "" || svc.Version == deployedVersions[key] {
 			continue // not in-flight
 		}
 
@@ -706,17 +745,20 @@ func ServicesToDeploy(
 			continue
 		}
 
-		// find the minimum valid upgrade step towards the desired version
-		currentVersion := deployedVersions[key]
-		minimumUpgrade := minimumUpgradeStep(upgradePaths, s.Name, s.Namespace, currentVersion, desiredVersion)
-		if minimumUpgrade.Version == "" {
-			minimumUpgrade = kcmv1.AvailableUpgrade{
+		// take the next hop the chain prescribes towards the desired template
+		nextUpgrade := nextUpgradeStep(upgradePaths, s.Name, s.Namespace, storedTemplates[key], desiredTemplate)
+		if nextUpgrade.Name == "" {
+			nextUpgrade = kcmv1.AvailableUpgrade{
 				Name:    desiredTemplate,
 				Version: desiredVersion,
 			}
+		} else if nextUpgrade.Version == nextUpgrade.Name {
+			// Only the template name, not a version: let ResolveServicesToApply read
+			// the real one off the hop's ServiceTemplate.
+			nextUpgrade.Version = ""
 		}
 
-		services = appendIfNotPresent(services, s, minimumUpgrade)
+		services = appendIfNotPresent(services, s, nextUpgrade)
 	}
 
 	return services
@@ -768,7 +810,7 @@ func ResolveServicesToApply(
 	ctx context.Context,
 	c client.Client,
 	systemNamespace string,
-	mcs *kcmv1.MultiClusterService,
+	mcs kcmv1.MultiClusterServiceCommon,
 	cd *kcmv1.ClusterDeployment,
 	desiredServices []kcmv1.Service,
 	serviceSet *kcmv1.ServiceSet,
@@ -797,17 +839,31 @@ func ResolveServicesToApply(
 	}
 
 	upgradePaths, err := ServicesUpgradePaths(
-		ctx, c, ServicesWithDesiredChains(resolvedDesired, storedServices), templateNamespace)
+		ctx, c, ServicesWithDesiredChains(resolvedDesired, storedServices), templateNamespace,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine upgrade paths: %w", err)
 	}
 
-	return ServicesToDeploy(upgradePaths, filteredServices, serviceSet), nil
+	servicesToDeploy := ServicesToDeploy(upgradePaths, filteredServices, serviceSet)
+
+	// A chain hop identifies its ServiceTemplate but carries no version of its own
+	// unless the chain sets one.
+	if err := ResolveServiceVersions(ctx, c, templateNamespace, servicesToDeploy); err != nil {
+		return nil, fmt.Errorf("failed to resolve versions for services to deploy: %w", err)
+	}
+
+	return servicesToDeploy, nil
 }
 
-func desiredVersionInUpgradePaths(
+// desiredTemplateInUpgradePaths reports whether the routes allow the service to
+// reach the desired template at all. Matching on the template name as well as the
+// version matters because a route's version may be a copy of the template name,
+// which never equals the version resolved from the ServiceTemplate (#3042).
+func desiredTemplateInUpgradePaths(
 	upgradePaths []kcmv1.ServiceUpgradePaths,
 	svc kcmv1.ServiceWithValues,
+	desiredTemplate string,
 	desiredVersion string,
 ) bool {
 	var res bool
@@ -822,7 +878,7 @@ func desiredVersionInUpgradePaths(
 		}
 		for _, upgradeList := range upgradePath.AvailableUpgrades {
 			if slices.ContainsFunc(upgradeList.Versions, func(c kcmv1.AvailableUpgrade) bool {
-				return c.Version == desiredVersion
+				return c.Name == desiredTemplate || c.Version == desiredVersion
 			}) {
 				return true
 			}
@@ -833,8 +889,8 @@ func desiredVersionInUpgradePaths(
 }
 
 type OperationRequisites struct {
-	ObjectKey       client.ObjectKey
-	MCS             *kcmv1.MultiClusterService
+	ServiceSetKey   client.ObjectKey
+	MCS             kcmv1.MultiClusterServiceCommon
 	CD              *kcmv1.ClusterDeployment
 	SystemNamespace string
 }
@@ -908,9 +964,10 @@ func GetServiceSetWithOperation(
 	// Determine desired services and service spec from MCS or CD.
 	var desiredServices []kcmv1.Service
 	var serviceSpec kcmv1.ServiceSpec
-	if operationReq.MCS != nil {
-		desiredServices = operationReq.MCS.Spec.ServiceSpec.Services
-		serviceSpec = operationReq.MCS.Spec.ServiceSpec
+	if !kcmv1.IsMCSNil(operationReq.MCS) {
+		spec := operationReq.MCS.GetMultiClusterServiceSpec()
+		desiredServices = spec.ServiceSpec.Services
+		serviceSpec = spec.ServiceSpec
 	} else {
 		desiredServices = operationReq.CD.Spec.ServiceSpec.Services
 		serviceSpec = operationReq.CD.Spec.ServiceSpec
@@ -930,18 +987,19 @@ func GetServiceSetWithOperation(
 	// Update by default, create if ServiceSet does not exist.
 	serviceSet := new(kcmv1.ServiceSet)
 	op := kcmv1.ServiceSetOperationUpdate
-	err = c.Get(ctx, operationReq.ObjectKey, serviceSet)
+	err = c.Get(ctx, operationReq.ServiceSetKey, serviceSet)
 	if apierrors.IsNotFound(err) {
 		l.V(1).Info("ServiceSet does not exist", "operation", kcmv1.ServiceSetOperationCreate)
-		serviceSet.SetName(operationReq.ObjectKey.Name)
-		serviceSet.SetNamespace(operationReq.ObjectKey.Namespace)
+		serviceSet.SetName(operationReq.ServiceSetKey.Name)
+		serviceSet.SetNamespace(operationReq.ServiceSetKey.Namespace)
 		op = kcmv1.ServiceSetOperationCreate
 	} else if err != nil {
-		return nil, kcmv1.ServiceSetOperationNone, fmt.Errorf("failed to get ServiceSet %s: %w", operationReq.ObjectKey, err)
+		return nil, kcmv1.ServiceSetOperationNone, fmt.Errorf("failed to get ServiceSet %s: %w", operationReq.ServiceSetKey, err)
 	}
 
 	filteredServices, err := ResolveServicesToApply(
-		ctx, c, operationReq.SystemNamespace, operationReq.MCS, operationReq.CD, desiredServices, serviceSet)
+		ctx, c, operationReq.SystemNamespace, operationReq.MCS, operationReq.CD, desiredServices, serviceSet,
+	)
 	if err != nil {
 		return nil, kcmv1.ServiceSetOperationNone, fmt.Errorf("failed to resolve services to apply: %w", err)
 	}
@@ -955,7 +1013,7 @@ func GetServiceSetWithOperation(
 	existingSpec := serviceSet.Spec
 
 	candidate, err := NewBuilder(operationReq.CD, serviceSet, provider.Spec.Selector).
-		WithMultiClusterService(operationReq.MCS).
+		WithMultiClusterServiceCommon(operationReq.MCS).
 		WithServicesToDeploy(resultingServices).Build()
 	if err != nil {
 		return nil, kcmv1.ServiceSetOperationNone, fmt.Errorf("failed to build ServiceSet: %w", err)
