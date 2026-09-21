@@ -15,6 +15,7 @@
 package serviceset
 
 import (
+	"slices"
 	"testing"
 
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
@@ -2263,4 +2264,137 @@ func Test_fetchServiceSet(t *testing.T) {
 			require.Equal(t, tt.wantMCS, got.Spec.MultiClusterService, "unexpected .spec.multiClusterService")
 		})
 	}
+}
+
+func Test_DependencyOrder(t *testing.T) {
+	t.Parallel()
+
+	// cert-manager <- kserve-crd <- kserve-resources. Alphabetically this chain
+	// happens to sort into dependency order; the names below deliberately do not.
+	crd := testService{kcmv1.Service{Namespace: "zzz", Name: "zzz-crd"}}
+	app := testService{kcmv1.Service{Namespace: "aaa", Name: "aaa-app"}}.dependsOn(crd)
+	extra := testService{kcmv1.Service{Namespace: "mmm", Name: "mmm-extra"}}.dependsOn(app)
+	traefik := testService{kcmv1.Service{Namespace: "traefik", Name: "traefik"}}
+
+	// leafA and leafB both sit on top of root, nothing sits on top of them
+	root := testService{kcmv1.Service{Namespace: "ns", Name: "root"}}
+	leafA := testService{kcmv1.Service{Namespace: "ns", Name: "leaf-a"}}.dependsOn(root)
+	leafB := testService{kcmv1.Service{Namespace: "ns", Name: "leaf-b"}}.dependsOn(root)
+
+	deployed := func(services ...testService) []kcmv1.ServiceWithValues {
+		out := make([]kcmv1.ServiceWithValues, 0, len(services))
+		for _, svc := range services {
+			out = append(out, kcmv1.ServiceWithValues{Namespace: svc.Namespace, Name: svc.Name})
+		}
+		return out
+	}
+	names := func(services []kcmv1.ServiceWithValues) []string {
+		out := make([]string, 0, len(services))
+		for _, svc := range services {
+			out = append(out, svc.Name)
+		}
+		return out
+	}
+
+	for _, tc := range []struct {
+		name       string
+		services   []kcmv1.ServiceWithValues
+		desired    []testService
+		want       []string
+		wantCyclic bool
+	}{
+		{
+			name: "a chain listed alphabetically is rewritten dependencies first",
+			// what FilterServiceDependencies hands over once the chain is deployed
+			services: deployed(app, extra, crd),
+			desired:  []testService{crd, app, extra},
+			want:     []string{"zzz-crd", "aaa-app", "mmm-extra"},
+		},
+		{
+			name:     "no dependencies leave the order alone",
+			services: deployed(app, extra, crd),
+			desired: []testService{
+				{kcmv1.Service{Namespace: "zzz", Name: "zzz-crd"}},
+				{kcmv1.Service{Namespace: "aaa", Name: "aaa-app"}},
+				{kcmv1.Service{Namespace: "mmm", Name: "mmm-extra"}},
+			},
+			want: []string{"aaa-app", "mmm-extra", "zzz-crd"},
+		},
+		{
+			name:     "an independent service keeps its place among equals",
+			services: deployed(traefik, app, crd),
+			desired:  []testService{traefik, app, crd},
+			want:     []string{"traefik", "zzz-crd", "aaa-app"},
+		},
+		{
+			name:     "a shared dependency precedes both of its dependents",
+			services: deployed(leafA, leafB, root),
+			desired:  []testService{root, leafA, leafB},
+			want:     []string{"root", "leaf-a", "leaf-b"},
+		},
+		{
+			name: "edges pointing outside the deployed services are ignored",
+			// the chain is only half rolled out: crd is not in the ServiceSet yet,
+			// so the edge to it cannot constrain anything
+			services: deployed(extra, app),
+			desired:  []testService{crd, app, extra},
+			want:     []string{"aaa-app", "mmm-extra"},
+		},
+		{
+			name:     "a cycle leaves the order untouched and says so",
+			services: deployed(app, crd),
+			desired: []testService{
+				testService{kcmv1.Service{Namespace: "zzz", Name: "zzz-crd"}}.dependsOn(app),
+				app,
+			},
+			want:       []string{"aaa-app", "zzz-crd"},
+			wantCyclic: true,
+		},
+		{
+			name: "empty",
+			want: []string{},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			input := slices.Clone(tc.services)
+			got, cyclic := DependencyOrder(input, testServices2Services(t, tc.desired))
+			require.Equal(t, tc.wantCyclic, cyclic)
+			require.Equal(t, tc.want, names(got))
+			require.Equal(t, tc.services, input, "the input slice must not be reordered in place")
+		})
+	}
+}
+
+// Test_BuildServicesList_DependencyOrder pins the property the sveltos teardown
+// relies on: the spec the ServiceSet is built with lists every service after the
+// services it depends on, whatever order the eligible and locked services arrive
+// in. Sveltos uninstalls spec.helmCharts back to front, so that is what makes a
+// dependsOn chain uninstallable.
+func Test_BuildServicesList_DependencyOrder(t *testing.T) {
+	t.Parallel()
+
+	crd := kcmv1.ServiceWithValues{Namespace: "zzz", Name: "zzz-crd", Version: "1.0"}
+	app := kcmv1.ServiceWithValues{Namespace: "aaa", Name: "aaa-app", Version: "1.0"}
+	desired := []kcmv1.Service{
+		{Namespace: "zzz", Name: "zzz-crd"},
+		{
+			Namespace: "aaa", Name: "aaa-app",
+			DependsOn: []kcmv1.ServiceDependsOn{{Namespace: "zzz", Name: "zzz-crd"}},
+		},
+	}
+
+	t.Run("both eligible: the alphabetical order is rewritten", func(t *testing.T) {
+		t.Parallel()
+		// FilterServiceDependencies sorts by namespace and name, so this is the
+		// order the steady state arrives in
+		got := BuildServicesList(nil, []kcmv1.ServiceWithValues{app, crd}, desired)
+		require.Equal(t, []kcmv1.ServiceWithValues{crd, app}, got)
+	})
+
+	t.Run("dependent still locked: it is carried over and stays last", func(t *testing.T) {
+		t.Parallel()
+		got := BuildServicesList([]kcmv1.ServiceWithValues{app}, []kcmv1.ServiceWithValues{crd}, desired)
+		require.Equal(t, []kcmv1.ServiceWithValues{crd, app}, got)
+	})
 }
