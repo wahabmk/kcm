@@ -1057,6 +1057,13 @@ func collectServiceStatusesFromProfileOrClusterProfile(ctx context.Context, rgnC
 
 // getHelmCharts returns slice of helm chart options to use with Sveltos.
 // Namespace is the namespace of the referred templates in services slice.
+//
+// The charts keep the order of the services in the spec, which is the order
+// sveltos deploys them in and, back to front, the order it uninstalls them in
+// (addon-controller controllers/handlers_helm.go, uninstallHelmCharts). That
+// order is not incidental: [serviceset.BuildServicesList] writes the spec in
+// dependency order so a dependsOn chain is torn down dependents first, so keep
+// this loop walking .spec.services as listed.
 func getHelmCharts(ctx context.Context, c client.Client, serviceSet *kcmv1.ServiceSet) ([]addoncontrollerv1beta1.HelmChart, error) {
 	var templateInvalidErrors error
 	helmCharts := make([]addoncontrollerv1beta1.HelmChart, 0)

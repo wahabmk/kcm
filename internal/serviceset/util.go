@@ -743,12 +743,104 @@ func ServicesToDeploy(
 	return services
 }
 
+// DependencyOrder returns services ordered for deployment: every service is
+// preceded by each of the services it depends on.
+//
+// That order is what the state manager needs the services written down in. For
+// the sveltos adapter it reaches the Profile as the order of spec.helmCharts,
+// which sveltos walks forward to deploy and, since
+// projectsveltos/addon-controller#1984, backward to uninstall
+// (controllers/handlers_helm.go, uninstallHelmCharts). A list in dependency
+// order is therefore torn down dependents first, which is what a dependsOn
+// chain needs: helm refuses to uninstall a chart whose CRDs a dependent is
+// still using, and the failed uninstall wedges the whole undeploy (#3066).
+//
+// Nothing else writes that order down today. [FilterServiceDependencies] sorts
+// the eligible services by namespace and name for determinism, so once a chain
+// is fully deployed the spec is in alphabetical order, which only matches the
+// dependency order by luck.
+//
+// Sorted by dependency depth, ascending and stable, so services that constrain
+// nothing keep the order they came in with. [kcmv1.ServiceWithValues] carries no
+// DependsOn, so the edges are read from desired; edges pointing outside services
+// are ignored. A cycle has no order to give: it leaves services untouched and is
+// reported.
+func DependencyOrder(services []kcmv1.ServiceWithValues, desired []kcmv1.Service) (_ []kcmv1.ServiceWithValues, cyclic bool) {
+	ordered := slices.Clone(services)
+
+	present := make(map[client.ObjectKey]struct{}, len(services))
+	for _, svc := range services {
+		present[ServiceKey(svc.Namespace, svc.Name)] = struct{}{}
+	}
+
+	dependsOn := make(map[client.ObjectKey][]client.ObjectKey, len(desired))
+	for _, svc := range desired {
+		key := ServiceKey(svc.Namespace, svc.Name)
+		if _, ok := present[key]; !ok {
+			continue
+		}
+		for _, dep := range svc.DependsOn {
+			depKey := ServiceKey(dep.Namespace, dep.Name)
+			if _, ok := present[depKey]; ok {
+				dependsOn[key] = append(dependsOn[key], depKey)
+			}
+		}
+	}
+
+	if len(dependsOn) == 0 {
+		return ordered, false // no edges, so every order is a dependency order
+	}
+
+	// depth is the longest dependsOn chain below a service. Every edge u -> v has
+	// depth(u) > depth(v), so ascending depth is a topological order.
+	var (
+		depth    = make(map[client.ObjectKey]int, len(services))
+		visiting = make(map[client.ObjectKey]struct{}, len(services))
+		depthOf  func(client.ObjectKey) int
+	)
+	depthOf = func(key client.ObjectKey) int {
+		if d, ok := depth[key]; ok {
+			return d
+		}
+		if _, ok := visiting[key]; ok {
+			cyclic = true
+			return 0
+		}
+		visiting[key] = struct{}{}
+		d := 0
+		for _, dep := range dependsOn[key] {
+			if depDepth := depthOf(dep) + 1; depDepth > d {
+				d = depDepth
+			}
+		}
+		delete(visiting, key)
+		depth[key] = d
+		return d
+	}
+	// walked over the slice rather than over present, so the pass that trips on a
+	// cycle does not depend on map iteration order
+	for _, svc := range services {
+		depthOf(ServiceKey(svc.Namespace, svc.Name))
+		if cyclic {
+			return ordered, true
+		}
+	}
+
+	slices.SortStableFunc(ordered, func(a, b kcmv1.ServiceWithValues) int {
+		return depth[ServiceKey(a.Namespace, a.Name)] - depth[ServiceKey(b.Namespace, b.Name)]
+	})
+
+	return ordered, false
+}
+
 // BuildServicesList produces the final list of services for the ServiceSet spec by:
 //  1. Including all services from filtered (with their computed target versions).
 //  2. Preserving services from stored that are still present in desired but were
 //     not included in filtered (locked — dependencies not yet satisfied).
 //  3. Dropping services from stored that are no longer present in desired
 //     (explicitly removed by the user).
+//  4. Ordering the result so that every service follows the services it depends
+//     on, see [DependencyOrder].
 func BuildServicesList(
 	stored []kcmv1.ServiceWithValues,
 	filtered []kcmv1.ServiceWithValues,
@@ -776,6 +868,13 @@ func BuildServicesList(
 			continue // already covered by filtered — skip
 		}
 		result = append(result, svc) // locked — preserve at current version
+	}
+
+	// A cycle leaves the spec in the order assembled above: those services never
+	// pass the dependency gate in [FilterServiceDependencies] anyway, so there is
+	// nothing to order and nothing to tear down.
+	if ordered, cyclic := DependencyOrder(result, desired); !cyclic {
+		return ordered
 	}
 
 	return result
