@@ -119,10 +119,11 @@ func (r *MultiClusterServiceCommonReconciler) reconcileUpdate(ctx context.Contex
 	l := ctrl.LoggerFrom(ctx)
 
 	var isNamespacedMCS bool
-	mcsKind := kcmv1.MultiClusterServiceKind
+	mcsKind := kcmv1.MCSKind(mcs)
 	finalizer := kcmv1.MultiClusterServiceFinalizer
 	indexKey := kcmv1.ServiceSetMultiClusterServiceIndexKey
-	if _, isNamespacedMCS = mcs.(*kcmv1.NamespacedMultiClusterService); isNamespacedMCS {
+	if mcsKind == kcmv1.NamespacedMultiClusterServiceKind {
+		isNamespacedMCS = true
 		finalizer = kcmv1.NamespacedMultiClusterServiceFinalizer
 		mcsKind = kcmv1.NamespacedMultiClusterServiceKind
 		indexKey = kcmv1.ServiceSetNamespacedMultiClusterServiceIndexKey
@@ -207,10 +208,9 @@ func (r *MultiClusterServiceCommonReconciler) validateSpec(ctx context.Context, 
 
 	l := ctrl.LoggerFrom(ctx)
 
-	mcsKind := kcmv1.MultiClusterServiceKind
+	mcsKind := kcmv1.MCSKind(mcs)
 	mcsNamespace := r.SystemNamespace
-	if _, ok := mcs.(*kcmv1.NamespacedMultiClusterService); ok {
-		mcsKind = kcmv1.NamespacedMultiClusterServiceKind
+	if mcsKind == kcmv1.NamespacedMultiClusterServiceKind {
 		mcsNamespace = mcs.GetNamespace()
 	}
 	mcsSpec := mcs.GetMultiClusterServiceSpec()
@@ -300,10 +300,10 @@ func (r *MultiClusterServiceCommonReconciler) ensureServiceSets(ctx context.Cont
 
 	l := ctrl.LoggerFrom(ctx)
 
-	mcsKind := kcmv1.MultiClusterServiceKind
-	_, isNamespacedMCS := mcs.(*kcmv1.NamespacedMultiClusterService)
-	if isNamespacedMCS {
-		mcsKind = kcmv1.NamespacedMultiClusterServiceKind
+	var isNamespacedMCS bool
+	mcsKind := kcmv1.MCSKind(mcs)
+	if mcsKind == kcmv1.NamespacedMultiClusterServiceKind {
+		isNamespacedMCS = true
 	}
 	mcsSpec := mcs.GetMultiClusterServiceSpec()
 
@@ -419,11 +419,7 @@ func (*MultiClusterServiceCommonReconciler) setClustersCondition(ctx context.Con
 		return
 	}
 
-	mcsKind := kcmv1.MultiClusterServiceKind
-	if _, ok := mcs.(*kcmv1.NamespacedMultiClusterService); ok {
-		mcsKind = kcmv1.NamespacedMultiClusterServiceKind
-	}
-
+	mcsKind := kcmv1.MCSKind(mcs)
 	l := ctrl.LoggerFrom(ctx)
 	l.V(1).Info("Reconciling " + mcsKind + " conditions")
 
@@ -514,10 +510,7 @@ func (*MultiClusterServiceCommonReconciler) setDependencyReadyCondition(mcs kcmv
 		return
 	}
 
-	mcsKind := kcmv1.MultiClusterServiceKind
-	if _, ok := mcs.(*kcmv1.NamespacedMultiClusterService); ok {
-		mcsKind = kcmv1.NamespacedMultiClusterServiceKind
-	}
+	mcsKind := kcmv1.MCSKind(mcs)
 
 	c := metav1.Condition{
 		Type:               kcmv1.MultiClusterServiceDependencyReadyCondition,
@@ -588,13 +581,9 @@ func (r *MultiClusterServiceCommonReconciler) setMatchingClusters(ctx context.Co
 		return nil
 	}
 
-	mcsKey := kcmv1.MultiClusterServiceKind
-	if _, ok := mcs.(*kcmv1.NamespacedMultiClusterService); ok {
-		mcsKey = kcmv1.NamespacedMultiClusterServiceKind
-	}
-
+	mcsKind := kcmv1.MCSKind(mcs)
 	l := ctrl.LoggerFrom(ctx)
-	l.V(1).Info("Reconciling " + mcsKey + " matching clusters")
+	l.V(1).Info("Reconciling " + mcsKind + " matching clusters")
 	now := metav1.NewTime(r.timeFunc())
 	// clusterEntries is keyed by clusterTargetKey rather than appended to a plain slice, because
 	// a cluster can appear in both serviceSets and blocked at the same time: its ServiceSet may have been
@@ -764,19 +753,15 @@ func (r *MultiClusterServiceCommonReconciler) reconcileDelete(ctx context.Contex
 
 	l := ctrl.LoggerFrom(ctx)
 
-	mcsKind := kcmv1.MultiClusterServiceKind
+	mcsKind := kcmv1.MCSKind(mcs)
 	indexKey := kcmv1.ServiceSetMultiClusterServiceIndexKey
 	finalizer := kcmv1.MultiClusterServiceFinalizer
-	if _, ok := mcs.(*kcmv1.NamespacedMultiClusterService); ok {
-		mcsKind = kcmv1.NamespacedMultiClusterServiceKind
+	if mcsKind == kcmv1.NamespacedMultiClusterServiceKind {
 		indexKey = kcmv1.ServiceSetNamespacedMultiClusterServiceIndexKey
 		finalizer = kcmv1.NamespacedMultiClusterServiceFinalizer
 	}
 
 	l.Info("Deleting " + mcsKind)
-
-	mcs.GetName()
-
 	defer func() {
 		if err == nil {
 			for _, svc := range mcs.GetMultiClusterServiceSpec().ServiceSpec.Services {
@@ -945,15 +930,15 @@ func (r *MultiClusterServiceCommonReconciler) cleanupServiceSets(ctx context.Con
 		return nil
 	}
 
-	mcsKind := kcmv1.MultiClusterServiceKind
+	var isNamespacedMCS bool
+	mcsKind := kcmv1.MCSKind(mcs)
 	indexKey := kcmv1.ServiceSetMultiClusterServiceIndexKey
-	_, isNamespacedMCS := mcs.(*kcmv1.NamespacedMultiClusterService)
-	if isNamespacedMCS {
-		mcsKind = kcmv1.NamespacedMultiClusterServiceKind
+	if mcsKind == kcmv1.NamespacedMultiClusterServiceKind {
+		isNamespacedMCS = true
 		indexKey = kcmv1.ServiceSetNamespacedMultiClusterServiceIndexKey
 	}
-	mcsSpec := mcs.GetMultiClusterServiceSpec()
 
+	mcsSpec := mcs.GetMultiClusterServiceSpec()
 	if mcsSpec.KeepServicesOnSelectorMismatch {
 		return nil
 	}
@@ -1074,14 +1059,18 @@ func (r *MultiClusterServiceCommonReconciler) resolveDependencies(ctx context.Co
 	mcsSpec := mcs.GetMultiClusterServiceSpec()
 	deps := make([]resolvedDependency, 0, len(mcsSpec.DependsOn))
 
-	_, isNamespacedMCS := mcs.(*kcmv1.NamespacedMultiClusterService)
-	depKind := kcmv1.MCSKind(mcs)
+	var isNamespacedMCS bool
+	mcsKind := kcmv1.MCSKind(mcs)
+	if mcsKind == kcmv1.NamespacedMultiClusterServiceKind {
+		isNamespacedMCS = true
+	}
 
 	for _, dep := range mcsSpec.DependsOn {
 		// If the mcs is NOT namespaced then mcs.GetNamespace() will be empty
 		// which is what we want for a cluster-wide MultiClusterService.
 		rd := resolvedDependency{
-			kind:   depKind,
+			// Dependencies are always the same kind as mcs (see resolvedDependency.kind).
+			kind:   mcsKind,
 			mcsKey: client.ObjectKey{Name: dep, Namespace: mcs.GetNamespace()},
 		}
 
@@ -1102,10 +1091,6 @@ func (r *MultiClusterServiceCommonReconciler) resolveDependencies(ctx context.Co
 				continue
 			}
 			depMCS = x
-		}
-
-		if kcmv1.IsMCSNil(depMCS) {
-			continue
 		}
 
 		spec := depMCS.GetMultiClusterServiceSpec()
