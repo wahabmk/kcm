@@ -15,8 +15,6 @@
 package multiclusterservice
 
 import (
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	kcmv1 "github.com/K0rdent/kcm/api/v1beta1"
 )
 
@@ -28,9 +26,7 @@ type Opt func(multiClusterService *kcmv1.MultiClusterService)
 
 func NewMultiClusterService(opts ...Opt) *kcmv1.MultiClusterService {
 	p := &kcmv1.MultiClusterService{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: DefaultName,
-		},
+		Name: DefaultName,
 	}
 
 	for _, opt := range opts {
@@ -47,6 +43,39 @@ func WithName(name string) Opt {
 
 func WithServiceTemplate(templateName string) Opt {
 	return func(p *kcmv1.MultiClusterService) {
+		p.Spec.ServiceSpec.Services = append(p.Spec.ServiceSpec.Services, kcmv1.Service{
+			Template: templateName,
+		})
+	}
+}
+
+type NamespacedOpt func(namespacedMultiClusterService *kcmv1.NamespacedMultiClusterService)
+
+func NewNamespacedMultiClusterService(opts ...NamespacedOpt) *kcmv1.NamespacedMultiClusterService {
+	p := &kcmv1.NamespacedMultiClusterService{
+		Name: DefaultName,
+	}
+
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
+}
+
+func WithNamespacedName(name string) NamespacedOpt {
+	return func(p *kcmv1.NamespacedMultiClusterService) {
+		p.Name = name
+	}
+}
+
+func WithNamespacedNamespace(namespace string) NamespacedOpt {
+	return func(p *kcmv1.NamespacedMultiClusterService) {
+		p.Namespace = namespace
+	}
+}
+
+func WithNamespacedServiceTemplate(templateName string) NamespacedOpt {
+	return func(p *kcmv1.NamespacedMultiClusterService) {
 		p.Spec.ServiceSpec.Services = append(p.Spec.ServiceSpec.Services, kcmv1.Service{
 			Template: templateName,
 		})

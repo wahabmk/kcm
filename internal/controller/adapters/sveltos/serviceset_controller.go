@@ -502,7 +502,7 @@ func (r *ServiceSetReconciler) reconcileDelete(ctx context.Context, rgnClient cl
 	}
 
 	var profile client.Object
-	if serviceSet.Spec.Provider.SelfManagement {
+	if serviceSet.IsSelfManaging() {
 		profile = new(addoncontrollerv1beta1.ClusterProfile)
 	} else {
 		profile = new(addoncontrollerv1beta1.Profile)
@@ -585,10 +585,8 @@ func (r *ServiceSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}
 			return []ctrl.Request{
 				{
-					NamespacedName: client.ObjectKey{
-						Name:      serviceSet.Name,
-						Namespace: serviceSet.Namespace,
-					},
+					Name:      serviceSet.Name,
+					Namespace: serviceSet.Namespace,
 				},
 			}, nil
 		})).
@@ -610,10 +608,8 @@ func (r *ServiceSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			requests := make([]ctrl.Request, 0, len(serviceSets.Items))
 			for _, serviceSet := range serviceSets.Items {
 				requests = append(requests, ctrl.Request{
-					NamespacedName: client.ObjectKey{
-						Name:      serviceSet.Name,
-						Namespace: serviceSet.Namespace,
-					},
+					Name:      serviceSet.Name,
+					Namespace: serviceSet.Namespace,
 				})
 			}
 			return requests, nil
@@ -668,7 +664,7 @@ func (r *ServiceSetReconciler) ensureProfile(ctx context.Context, rgnClient clie
 		return fmt.Errorf("failed to build Profile: %w", err)
 	}
 
-	if serviceSet.Spec.Provider.SelfManagement {
+	if serviceSet.IsSelfManaging() {
 		if err = r.createOrUpdateClusterProfile(ctx, rgnClient, serviceSet, spec); err != nil {
 			return fmt.Errorf("failed to create or update ClusterProfile: %w", err)
 		}
@@ -805,7 +801,8 @@ func (r *ServiceSetReconciler) profileSpec(ctx context.Context, rgnClient client
 		clusterPolicyRefs           []addoncontrollerv1beta1.PolicyRef
 		err                         error
 	)
-	if serviceSet.Spec.Provider.SelfManagement {
+
+	if serviceSet.IsSelfManaging() {
 		clusterRef = corev1.ObjectReference{
 			Kind:       libsveltosv1beta1.SveltosClusterKind,
 			Namespace:  managementSveltosCluster,
@@ -927,7 +924,7 @@ func (r *ServiceSetReconciler) collectServiceStatuses(ctx context.Context, rgnCl
 		l.V(1).Info("Finished services status collection", "duration", time.Since(start))
 	}(initialConditionStatus)
 
-	if serviceSet.Spec.Provider.SelfManagement {
+	if serviceSet.IsSelfManaging() {
 		clusterProfile := new(addoncontrollerv1beta1.ClusterProfile)
 		key := client.ObjectKeyFromObject(serviceSet)
 		if err := rgnClient.Get(ctx, key, clusterProfile); err != nil {
@@ -1468,12 +1465,7 @@ func convertValuesFrom(src []kcmv1.ValuesFrom, namespace string) []addoncontroll
 
 func convertHelmOptions(options *kcmv1.ServiceHelmOptions) *addoncontrollerv1beta1.HelmOptions {
 	if options == nil {
-		// we'll set atomic to true in case no helm options were
-		// defined to protect the deployment from unintended deletion
-		// in case of failed upgrade on the sveltos side.
-		return new(addoncontrollerv1beta1.HelmOptions{
-			Atomic: true,
-		})
+		return nil
 	}
 	toReturn := addoncontrollerv1beta1.HelmOptions{
 		Timeout: options.Timeout,
@@ -1513,11 +1505,6 @@ func convertHelmOptions(options *kcmv1.ServiceHelmOptions) *addoncontrollerv1bet
 
 	if options.Atomic != nil {
 		toReturn.Atomic = *options.Atomic
-	} else {
-		// we'll set atomic to true in case it's not defined
-		// to protect the deployment from unintended deletion
-		// in case of failed upgrade on the sveltos side.
-		toReturn.Atomic = true
 	}
 
 	if options.DependencyUpdate != nil {
@@ -1877,7 +1864,7 @@ func resolveChildClient(
 	rgnClient client.Client,
 	serviceSet *kcmv1.ServiceSet,
 ) (client.Client, error) {
-	if serviceSet.Spec.Provider.SelfManagement {
+	if serviceSet.IsSelfManaging() {
 		return cl, nil
 	}
 
@@ -1904,7 +1891,7 @@ func resolveChildClient(
 }
 
 func clusterReference(serviceSet *kcmv1.ServiceSet) *corev1.ObjectReference {
-	if serviceSet.Spec.Provider.SelfManagement {
+	if serviceSet.IsSelfManaging() {
 		return serviceset.SelfManagementClusterReference()
 	}
 	return &corev1.ObjectReference{

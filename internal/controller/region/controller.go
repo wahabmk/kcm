@@ -65,6 +65,7 @@ type Reconciler struct {
 	defaultRequeueTime time.Duration
 
 	IsDisabledValidationWH bool // is webhook disabled set via the controller flags
+	EnableInPlaceUpdates   bool // passed to the components
 
 	skipCertManagerInstalledCheck bool
 }
@@ -184,6 +185,7 @@ func (r *Reconciler) update(ctx context.Context, rgnlClient client.Client, restC
 		GlobalRegistry:         r.GlobalRegistry,
 		RegistryCertSecretName: r.RegistryCertSecretName,
 		ImagePullSecretName:    r.ImagePullSecretName,
+		EnableInPlaceUpdates:   r.EnableInPlaceUpdates,
 
 		KubeConfigRef: overridenKubeconfigRef,
 
@@ -430,7 +432,7 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}).
 		For(&kcmv1.Region{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&kcmv1.Management{}, handler.EnqueueRequestsFromMapFunc(func(context.Context, client.Object) []ctrl.Request {
-			return []ctrl.Request{{NamespacedName: client.ObjectKey{Name: kcmv1.ManagementName}}}
+			return []ctrl.Request{{Name: kcmv1.ManagementName}}
 		}), builder.WithPredicates(predicate.Funcs{
 			GenericFunc: func(event.TypedGenericEvent[client.Object]) bool { return false },
 			DeleteFunc:  func(event.TypedDeleteEvent[client.Object]) bool { return false },
