@@ -51,7 +51,7 @@ func SelfManagementClusterReference() *corev1.ObjectReference {
 }
 
 // ObjectKey generates a unique key for a ServiceSet given the input and returns it.
-func ObjectKey(systemNamespace string, cd *kcmv1.ClusterDeployment, mcs *kcmv1.MultiClusterService) client.ObjectKey {
+func ObjectKey(systemNamespace string, cd *kcmv1.ClusterDeployment, mcs kcmv1.MultiClusterServiceCommon) client.ObjectKey {
 	// We'll use the following pattern to build ServiceSet name:
 	// <ClusterDeploymentName>-<MultiClusterServiceNameHash>
 	// this will guarantee that the ServiceSet produced by MultiClusterService
@@ -59,7 +59,7 @@ func ObjectKey(systemNamespace string, cd *kcmv1.ClusterDeployment, mcs *kcmv1.M
 	// then serviceSet with "management" prefix will be created and system namespace.
 	var serviceSetNamespace, serviceSetName string
 
-	mcsNameHash := sha256.Sum256([]byte(mcs.Name))
+	mcsNameHash := sha256.Sum256([]byte(mcs.GetFullname()))
 	if cd == nil {
 		serviceSetName = fmt.Sprintf("management-%x", mcsNameHash[:4])
 		serviceSetNamespace = systemNamespace
@@ -285,7 +285,7 @@ func FilterServiceDependencies(
 	ctx context.Context,
 	c client.Client,
 	systemNamespace string,
-	mcs *kcmv1.MultiClusterService,
+	mcs kcmv1.MultiClusterServiceCommon,
 	cd *kcmv1.ClusterDeployment,
 	desiredServices []kcmv1.Service,
 ) ([]kcmv1.Service, error) {
@@ -383,6 +383,26 @@ func FilterServiceDependencies(
 		deployedServices[k] = struct{}{}
 	}
 
+	// Each condition above tests a service on its own account, which is not
+	// enough to order a chain: a service whose version does not change in this
+	// release passes all three while the service it depends on is still being
+	// upgraded, and would unlock everything behind it - a transparent node. So
+	// the lock travels down the chain: satisfying your dependents means your own
+	// dependencies are satisfied too. Iterated to a fixpoint because dropping one
+	// service can drop its dependents in turn, however long the chain is.
+	for dropped := true; dropped; {
+		dropped = false
+		for k := range deployedServices {
+			for _, dep := range desiredServices[serviceIdx[k]].DependsOn {
+				if _, ok := deployedServices[ServiceKey(dep.Namespace, dep.Name)]; !ok {
+					delete(deployedServices, k)
+					dropped = true
+					break
+				}
+			}
+		}
+	}
+
 	// For each of the successfully deployed services,
 	// decrement the depends on count of its dependents.
 	for svc := range deployedServices {
@@ -404,7 +424,9 @@ func FilterServiceDependencies(
 		}
 	}
 
-	// Sort for deterministic ordering across reconcile cycles.
+	// Sort for deterministic ordering across reconcile cycles: filtered is built by
+	// ranging over a map, and sortByDependency only refines whatever order it is
+	// given. Without this the ServiceSet spec would be rewritten on every pass.
 	slices.SortFunc(filtered, func(a, b kcmv1.Service) int {
 		aKey := ServiceKey(a.Namespace, a.Name)
 		bKey := ServiceKey(b.Namespace, b.Name)
@@ -415,21 +437,74 @@ func FilterServiceDependencies(
 		return cmp.Compare(aKey.Name, bKey.Name)
 	})
 
-	return filtered, nil
+	return sortByDependency(filtered), nil
 }
 
-// fetchServiceSet fetches the ServiceSet associated with the provided mcs and cd.
-func fetchServiceSet(ctx context.Context, c client.Client, systemNamespace string, mcs *kcmv1.MultiClusterService, cd *kcmv1.ClusterDeployment) (kcmv1.ServiceSet, error) {
-	mcsName := ""
-	if mcs != nil {
-		mcsName = mcs.GetName()
+// sortByDependency puts a dependency ahead of its dependents within one batch.
+// Services eligible in the same reconcile are applied in the order they are
+// listed, so name order would upgrade a dependent first whenever it happens to
+// sort earlier.
+//
+// Depth-first post-order over the input: a service is placed once everything it
+// depends on has been. That refines the input order rather than replacing it, so
+// services with no dependency between them keep the order they arrived in - which
+// is why the caller sorts first, and why the result is stable across reconciles.
+//
+// A cycle is not rejected here: the recursion stops at an already-visited service,
+// so its members come out in some order instead of hanging. Cycles are reported by
+// the webhook.
+func sortByDependency(services []kcmv1.Service) []kcmv1.Service {
+	if len(services) < 2 {
+		return services
 	}
 
-	cdName := ""
-	namespace := systemNamespace
+	index := make(map[client.ObjectKey]int, len(services))
+	for i, svc := range services {
+		index[ServiceKey(svc.Namespace, svc.Name)] = i
+	}
+
+	ordered := make([]kcmv1.Service, 0, len(services))
+	seen := make([]bool, len(services))
+
+	// Depth first: a service is appended once everything it depends on within
+	// the batch has been. Already seen covers both the service placed earlier and
+	// the one this call is inside of, which is what keeps a cycle from recursing
+	// forever - its members come out in an arbitrary but stable order instead.
+	var place func(int)
+	place = func(i int) {
+		if seen[i] {
+			return
+		}
+		seen[i] = true
+		for _, dep := range services[i].DependsOn {
+			if j, ok := index[ServiceKey(dep.Namespace, dep.Name)]; ok {
+				place(j)
+			}
+		}
+		ordered = append(ordered, services[i])
+	}
+	for i := range services {
+		place(i)
+	}
+
+	return ordered
+}
+
+// fetchServiceSet fetches the ServiceSet associated with the provided MultiClusterService/NamespacedMultiClusterService and ClusterDeployment.
+func fetchServiceSet(ctx context.Context, c client.Client, systemNamespace string, mcs kcmv1.MultiClusterServiceCommon, cd *kcmv1.ClusterDeployment) (kcmv1.ServiceSet, error) {
+	cdName, cdNamespace := "", systemNamespace
 	if cd != nil {
 		cdName = cd.GetName()
-		namespace = cd.GetNamespace()
+		cdNamespace = cd.GetNamespace()
+	}
+
+	_, isNamespacedMCS := mcs.(*kcmv1.NamespacedMultiClusterService)
+
+	if !kcmv1.IsMCSNil(mcs) && isNamespacedMCS && mcs.GetNamespace() != cdNamespace {
+		// This is an error because:
+		// 1. A NamespacedMultiClusterService can only match a CD within its own namespace.
+		// 2. And it cannot create a self-managing ServiceSet.
+		return kcmv1.ServiceSet{}, fmt.Errorf("unexpected: the ClusterDeployment %s/%s and NamespacedMultiClusterService %s not in the same namespace", cdNamespace, cdName, mcs.GetFullname())
 	}
 
 	// Fetch serviceSet.
@@ -457,11 +532,24 @@ func fetchServiceSet(ctx context.Context, c client.Client, systemNamespace strin
 	if cdName != "" {
 		sel = fields.AndSelectors(sel, fields.OneTermEqualSelector(kcmv1.ServiceSetClusterIndexKey, cdName))
 	}
-	if mcsName != "" {
-		sel = fields.AndSelectors(sel, fields.OneTermEqualSelector(kcmv1.ServiceSetMultiClusterServiceIndexKey, mcsName))
+
+	if !kcmv1.IsMCSNil(mcs) {
+		indexKey := kcmv1.ServiceSetMultiClusterServiceIndexKey
+		if isNamespacedMCS {
+			indexKey = kcmv1.ServiceSetNamespacedMultiClusterServiceIndexKey
+		}
+		sel = fields.AndSelectors(sel, fields.OneTermEqualSelector(indexKey, mcs.GetFullname()))
 	}
-	if err := c.List(ctx, serviceSetList, client.InNamespace(namespace), client.MatchingFieldsSelector{Selector: sel}); err != nil {
+
+	// We can safely use cdNamespace here because we already checked if it
+	// matches the NamespacedMultiClusterService's namespace if mcs is namespaced.
+	if err := c.List(ctx, serviceSetList, client.InNamespace(cdNamespace), client.MatchingFieldsSelector{Selector: sel}); err != nil {
 		return kcmv1.ServiceSet{}, fmt.Errorf("failed to list ServiceSets: %w", err)
+	}
+
+	mcsName := ""
+	if !kcmv1.IsMCSNil(mcs) {
+		mcsName = mcs.GetName()
 	}
 
 	serviceSets := []kcmv1.ServiceSet{}
@@ -469,9 +557,9 @@ func fetchServiceSet(ctx context.Context, c client.Client, systemNamespace strin
 		/*
 			We can have the following cases:
 
-			case 1) cd == "" && mcs == "":
+			case 1) cd == "" && mc/nmcs == "":
 					This is impossible as there cannot be a ServiceSet with neither cd nor mcs set.
-			case 2) cd != "" && mcs == "":
+			case 2) cd != "" && mcs/nmcs == "":
 					This is a unique ServiceSet created by the ClusterDeployment Controller for the cd.
 					However, when querying the kube api service for this case, ALL ServiceSets that have
 					cd set are returned, which means the ServiceSets for all mcs matching the cd are also returned.
@@ -479,16 +567,16 @@ func fetchServiceSet(ctx context.Context, c client.Client, systemNamespace strin
 					This is a unique self-management ServiceSet created by the MultiClusterController for the mcs.
 					Here again ALL ServiceSets that have mcs set are returned even those belonging to any cd existing
 					in the system namespace.
-			case 4) cd != "" && mcs != "":
-					This is a unique Serviceset created by the MultiClusterController for mcs matching cd.
+			case 4) cd != "" && mcs/nmcs != "":
+					This is a unique Serviceset created by the MultiClusterController/NamespacedMultiClusterController for mcs/nmcs matching cd.
 
 			So in all cases except cases 2 and 3, a max of 1 ServiceSet is returned.
 		*/
-		if cdName != "" && mcsName == "" && sset.Spec.MultiClusterService != "" {
+		if cdName != "" && mcsName == "" && !sset.IsOwnedByClusterDeployment() {
 			// Handle case 2. We need the ServiceSet which is created only for the cd.
 			// So if cd is set and mcs is not (case 2) then we will ignore all ServiceSets
-			// in the returned list which have its `.spec.multiClusterService` set, so the
-			// only ServiceSet which will remain is the one created specifically for the cd.
+			// in the returned list which have its `.spec.multiClusterService` or `spec.namespacedMultiClusterService` set,
+			// so the only ServiceSet which will remain is the one created specifically for the cd.
 			continue
 		}
 		if cdName == "" && mcsName != "" && sset.Spec.Cluster != "" {
@@ -504,12 +592,17 @@ func fetchServiceSet(ctx context.Context, c client.Client, systemNamespace strin
 	}
 
 	if len(serviceSets) > 1 {
-		return kcmv1.ServiceSet{}, fmt.Errorf("expected 1 ServiceSet for cd=%s/%s && mcs=%s, got %d", namespace, cdName, mcsName, len(serviceSets))
+		mcsFullname := ""
+		if !kcmv1.IsMCSNil(mcs) {
+			mcsFullname = mcs.GetFullname()
+		}
+		return kcmv1.ServiceSet{}, fmt.Errorf("expected 1 ServiceSet for cd=%s/%s && mcs=%s, got %d", cdNamespace, cdName, mcsFullname, len(serviceSets))
 	}
 	if len(serviceSets) == 0 {
 		// We want 0 ServiceSets to be a no-op.
 		return kcmv1.ServiceSet{}, nil
 	}
+
 	return serviceSets[0], nil
 }
 
@@ -631,7 +724,7 @@ func ServicesToDeploy(
 ) []kcmv1.ServiceWithValues {
 	desiredVersions := make(map[client.ObjectKey]string)
 	desiredTemplates := make(map[client.ObjectKey]string)
-	deployedVersions := make(map[client.ObjectKey]string)
+	deployedVersions := DeployedVersions(serviceSet)
 	storedTemplates := make(map[client.ObjectKey]string)
 	upgradeAvailable := make(map[client.ObjectKey]bool)
 
@@ -647,10 +740,15 @@ func ServicesToDeploy(
 	}
 
 	// For stored services that are also in filteredServices: determine upgrade
-	// availability and track the deployed version. If the stored version differs
-	// from the deployed version the service is in-flight; emit it immediately with
-	// mutable fields merged from the desired spec and skip it in the main loop.
-	inFlight := make(map[client.ObjectKey]bool)
+	// availability and track the deployed version. A stored version differing from
+	// the deployed one means the service is in flight, and it is carried over as
+	// stored with mutable fields merged from the desired spec.
+	//
+	// Recorded here, appended below: the whole batch is emitted in one pass over
+	// filteredServices so the dependency order established there is what reaches
+	// the provider. Appending in flight services here would put them all ahead of
+	// it, including ahead of dependencies they need.
+	inFlightServices := make(map[client.ObjectKey]kcmv1.ServiceWithValues)
 	var services []kcmv1.ServiceWithValues
 
 	for _, svc := range serviceSet.Spec.Services {
@@ -663,14 +761,6 @@ func ServicesToDeploy(
 		storedTemplates[key] = svc.Template
 		upgradeAvailable[key] = svc.Version != "" && isDowngrade(desiredVersion, svc.Version) ||
 			desiredTemplateInUpgradePaths(upgradePaths, svc, desiredTemplates[key], desiredVersion)
-
-		for _, state := range serviceSet.Status.Services {
-			if state.State == kcmv1.ServiceStateDeployed &&
-				effectiveNamespace(state.Namespace) == effectiveNamespace(svc.Namespace) &&
-				state.Name == svc.Name && state.Version != "" {
-				deployedVersions[key] = state.Version
-			}
-		}
 
 		if svc.Version == "" || svc.Version == deployedVersions[key] {
 			continue // not in-flight
@@ -687,15 +777,15 @@ func ServicesToDeploy(
 				break
 			}
 		}
-		services = append(services, svc)
-		inFlight[key] = true
+		inFlightServices[key] = svc
 	}
 
 	// Process remaining filteredServices (not in-flight).
 	for _, s := range filteredServices {
 		key := ServiceKey(s.Namespace, s.Name)
 
-		if inFlight[key] {
+		if svc, ok := inFlightServices[key]; ok {
+			services = append(services, svc)
 			continue
 		}
 
@@ -789,7 +879,7 @@ func ResolveServicesToApply(
 	ctx context.Context,
 	c client.Client,
 	systemNamespace string,
-	mcs *kcmv1.MultiClusterService,
+	mcs kcmv1.MultiClusterServiceCommon,
 	cd *kcmv1.ClusterDeployment,
 	desiredServices []kcmv1.Service,
 	serviceSet *kcmv1.ServiceSet,
@@ -868,8 +958,8 @@ func desiredTemplateInUpgradePaths(
 }
 
 type OperationRequisites struct {
-	ObjectKey       client.ObjectKey
-	MCS             *kcmv1.MultiClusterService
+	ServiceSetKey   client.ObjectKey
+	MCS             kcmv1.MultiClusterServiceCommon
 	CD              *kcmv1.ClusterDeployment
 	SystemNamespace string
 }
@@ -943,9 +1033,10 @@ func GetServiceSetWithOperation(
 	// Determine desired services and service spec from MCS or CD.
 	var desiredServices []kcmv1.Service
 	var serviceSpec kcmv1.ServiceSpec
-	if operationReq.MCS != nil {
-		desiredServices = operationReq.MCS.Spec.ServiceSpec.Services
-		serviceSpec = operationReq.MCS.Spec.ServiceSpec
+	if !kcmv1.IsMCSNil(operationReq.MCS) {
+		spec := operationReq.MCS.GetMultiClusterServiceSpec()
+		desiredServices = spec.ServiceSpec.Services
+		serviceSpec = spec.ServiceSpec
 	} else {
 		desiredServices = operationReq.CD.Spec.ServiceSpec.Services
 		serviceSpec = operationReq.CD.Spec.ServiceSpec
@@ -965,14 +1056,14 @@ func GetServiceSetWithOperation(
 	// Update by default, create if ServiceSet does not exist.
 	serviceSet := new(kcmv1.ServiceSet)
 	op := kcmv1.ServiceSetOperationUpdate
-	err = c.Get(ctx, operationReq.ObjectKey, serviceSet)
+	err = c.Get(ctx, operationReq.ServiceSetKey, serviceSet)
 	if apierrors.IsNotFound(err) {
 		l.V(1).Info("ServiceSet does not exist", "operation", kcmv1.ServiceSetOperationCreate)
-		serviceSet.SetName(operationReq.ObjectKey.Name)
-		serviceSet.SetNamespace(operationReq.ObjectKey.Namespace)
+		serviceSet.SetName(operationReq.ServiceSetKey.Name)
+		serviceSet.SetNamespace(operationReq.ServiceSetKey.Namespace)
 		op = kcmv1.ServiceSetOperationCreate
 	} else if err != nil {
-		return nil, kcmv1.ServiceSetOperationNone, fmt.Errorf("failed to get ServiceSet %s: %w", operationReq.ObjectKey, err)
+		return nil, kcmv1.ServiceSetOperationNone, fmt.Errorf("failed to get ServiceSet %s: %w", operationReq.ServiceSetKey, err)
 	}
 
 	filteredServices, err := ResolveServicesToApply(
@@ -991,7 +1082,7 @@ func GetServiceSetWithOperation(
 	existingSpec := serviceSet.Spec
 
 	candidate, err := NewBuilder(operationReq.CD, serviceSet, provider.Spec.Selector).
-		WithMultiClusterService(operationReq.MCS).
+		WithMultiClusterServiceCommon(operationReq.MCS).
 		WithServicesToDeploy(resultingServices).Build()
 	if err != nil {
 		return nil, kcmv1.ServiceSetOperationNone, fmt.Errorf("failed to build ServiceSet: %w", err)
@@ -1012,6 +1103,46 @@ func effectiveNamespace(serviceNamespace string) string {
 		return metav1.NamespaceDefault
 	}
 	return serviceNamespace
+}
+
+// DeployedVersions indexes, per service, the version last confirmed on the
+// cluster. Only services the provider reports as Deployed are recorded: one
+// still provisioning has confirmed nothing, and a missing entry is what tells
+// callers so.
+func DeployedVersions(serviceSet *kcmv1.ServiceSet) map[client.ObjectKey]string {
+	versions := make(map[client.ObjectKey]string, len(serviceSet.Status.Services))
+	for _, state := range serviceSet.Status.Services {
+		if state.State != kcmv1.ServiceStateDeployed || state.Version == "" {
+			continue
+		}
+		versions[ServiceKey(state.Namespace, state.Name)] = state.Version
+	}
+	return versions
+}
+
+// FullyDeployed reports whether every service has reached the version its spec
+// asks for.
+//
+// Stricter than Status.Deployed, which only says the provider is done with what
+// it was last handed. The verifier can mark a service Deployed on the
+// fingerprint of the version it is upgrading away from, leaving Status.Version
+// behind Spec.Version and the stamp that advances it still owed - a state that
+// looks finished but is not.
+func FullyDeployed(serviceSet *kcmv1.ServiceSet) bool {
+	if !serviceSet.Status.Deployed {
+		return false
+	}
+
+	deployed := DeployedVersions(serviceSet)
+	for _, svc := range serviceSet.Spec.Services {
+		if svc.Version == "" {
+			continue
+		}
+		if deployed[ServiceKey(svc.Namespace, svc.Name)] != svc.Version {
+			return false
+		}
+	}
+	return true
 }
 
 // ServiceKey returns a unique identifier for a service

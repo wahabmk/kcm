@@ -82,6 +82,7 @@ type ManagementReconciler struct {
 
 	CreateAccessManagement bool
 	IsDisabledValidationWH bool // is webhook disabled set via the controller flags
+	EnableInPlaceUpdates   bool // passed to the components
 
 	sveltosDependentControllersStarted bool
 }
@@ -195,6 +196,7 @@ func (r *ManagementReconciler) update(ctx context.Context, management *kcmv1.Man
 		GlobalRegistry:         r.GlobalRegistry,
 		RegistryCertSecretName: r.RegistryCertSecretName,
 		ImagePullSecretName:    r.ImagePullSecretName,
+		EnableInPlaceUpdates:   r.EnableInPlaceUpdates,
 	}
 
 	requeue, errs := components.Reconcile(ctx, r.Client, r.Client, management, r.Config, release, opts)
@@ -344,13 +346,27 @@ func (r *ManagementReconciler) startDependentControllers(ctx context.Context, ma
 
 	l.Info("Provider has been successfully installed, so setting up controller for MultiClusterService")
 	if err = (&MultiClusterServiceReconciler{
-		SystemNamespace:        currentNamespace,
-		IsDisabledValidationWH: r.IsDisabledValidationWH,
+		MultiClusterServiceCommonReconciler{
+			SystemNamespace:        currentNamespace,
+			IsDisabledValidationWH: r.IsDisabledValidationWH,
+		},
 	}).SetupWithManager(r.Manager); err != nil {
 		return false, fmt.Errorf("failed to setup controller for MultiClusterService: %w", err)
 	}
 	r.eventf(management, "MultiClusterServiceControllerEnabled", "Sveltos is ready. Enabling MultiClusterService controller")
 	l.Info("Setup for MultiClusterService controller successful")
+
+	l.Info("Provider has been successfully installed, so setting up controller for NamespacedMultiClusterService")
+	if err = (&NamespacedMultiClusterServiceReconciler{
+		MultiClusterServiceCommonReconciler{
+			SystemNamespace:        currentNamespace,
+			IsDisabledValidationWH: r.IsDisabledValidationWH,
+		},
+	}).SetupWithManager(r.Manager); err != nil {
+		return false, fmt.Errorf("failed to setup controller for NamespacedMultiClusterService: %w", err)
+	}
+	r.eventf(management, "NamespacedMultiClusterServiceControllerEnabled", "Sveltos is ready. Enabling NamespacedMultiClusterService controller")
+	l.Info("Setup for NamespacedMultiClusterService controller successful")
 
 	r.sveltosDependentControllersStarted = true
 	return false, nil
@@ -365,15 +381,13 @@ func (r *ManagementReconciler) ensureAccessManagement(ctx context.Context, mgmt 
 	l.Info("Ensuring AccessManagement is created")
 
 	amObj := &kcmv1.AccessManagement{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: kcmv1.AccessManagementName,
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: kcmv1.GroupVersion.String(),
-					Kind:       mgmt.Kind,
-					Name:       mgmt.Name,
-					UID:        mgmt.UID,
-				},
+		Name: kcmv1.AccessManagementName,
+		OwnerReferences: []metav1.OwnerReference{
+			{
+				APIVersion: kcmv1.GroupVersion.String(),
+				Kind:       mgmt.Kind,
+				Name:       mgmt.Name,
+				UID:        mgmt.UID,
 			},
 		},
 	}
@@ -426,15 +440,13 @@ func (r *ManagementReconciler) ensureStateManagementProvider(ctx context.Context
 	)
 
 	stateManagementProvider := &kcmv1.StateManagementProvider{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: kubeutil.DefaultStateManagementProvider,
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: kcmv1.GroupVersion.String(),
-					Kind:       mgmt.Kind,
-					Name:       mgmt.Name,
-					UID:        mgmt.UID,
-				},
+		Name: kubeutil.DefaultStateManagementProvider,
+		OwnerReferences: []metav1.OwnerReference{
+			{
+				APIVersion: kcmv1.GroupVersion.String(),
+				Kind:       mgmt.Kind,
+				Name:       mgmt.Name,
+				UID:        mgmt.UID,
 			},
 		},
 		Spec: kcmv1.StateManagementProviderSpec{
@@ -687,14 +699,10 @@ func (r *ManagementReconciler) ensureUpgradeBackup(ctx context.Context, mgmt *kc
 		// have to create
 		if isNotFoundErr {
 			mb = &kcmv1.ManagementBackup{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: kcmv1.GroupVersion.String(),
-					Kind:       "ManagementBackup",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   name,
-					Labels: map[string]string{managementReleaseBackupLabel: r.boundedDNSName(mgmt.Status.Release, validationcontent.LabelValueMaxLength)},
-				},
+				APIVersion: kcmv1.GroupVersion.String(),
+				Kind:       "ManagementBackup",
+				Name:       name,
+				Labels:     map[string]string{managementReleaseBackupLabel: r.boundedDNSName(mgmt.Status.Release, validationcontent.LabelValueMaxLength)},
 				Spec: kcmv1.ManagementBackupSpec{
 					StorageLocation: location,
 				},
@@ -784,7 +792,7 @@ func (r *ManagementReconciler) getRelease(ctx context.Context, mgmt *kcmv1.Manag
 }
 
 func makeContainerdAuth(registry, user, pass string) ([]byte, error) {
-	registryHost := strings.Split(registry, "/")[0]
+	registryHost, _, _ := strings.Cut(registry, "/")
 	auth := map[string]any{
 		"auth": map[string]any{
 			"username": user,
@@ -812,10 +820,8 @@ func makeContainerdAuth(registry, user, pass string) ([]byte, error) {
 func (r *ManagementReconciler) ensureCldRegistryCredSecret(ctx context.Context, management *kcmv1.Management) error {
 	// secret that will be passed to clusterdeployment on management cluster
 	cldSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      cldRegSecretName,
-			Namespace: r.SystemNamespace,
-		},
+		Name:      cldRegSecretName,
+		Namespace: r.SystemNamespace,
 	}
 
 	if r.RegistryCredentialsSecretName == "" || r.GlobalRegistry == "" {
@@ -932,7 +938,7 @@ func (r *ManagementReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		setupLog := mgr.GetLogger().WithName("management_ctrl_setup")
 
 		managedController.Watches(&kcmv1.Release{}, handler.EnqueueRequestsFromMapFunc(func(context.Context, client.Object) []ctrl.Request {
-			return []ctrl.Request{{NamespacedName: client.ObjectKey{Name: kcmv1.ManagementName}}}
+			return []ctrl.Request{{Name: kcmv1.ManagementName}}
 		}), builder.WithPredicates(predicate.Funcs{
 			GenericFunc: func(event.TypedGenericEvent[client.Object]) bool { return false },
 			UpdateFunc: func(tue event.TypedUpdateEvent[client.Object]) bool {
@@ -953,7 +959,7 @@ func (r *ManagementReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		setupLog.Info("Validations are disabled, watcher for Release objects is set")
 
 		managedController.Watches(&kcmv1.ProviderTemplate{}, handler.EnqueueRequestsFromMapFunc(func(context.Context, client.Object) []ctrl.Request {
-			return []ctrl.Request{{NamespacedName: client.ObjectKey{Name: kcmv1.ManagementName}}}
+			return []ctrl.Request{{Name: kcmv1.ManagementName}}
 		}), builder.WithPredicates(predicate.Funcs{
 			GenericFunc: func(event.TypedGenericEvent[client.Object]) bool { return false },
 			DeleteFunc:  func(event.TypedDeleteEvent[client.Object]) bool { return false },

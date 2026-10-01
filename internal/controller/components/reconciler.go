@@ -77,6 +77,8 @@ type ReconcileComponentsOpts struct {
 	SkipCertManagerInstalledCheck bool
 	// CertManagerInstalled indicates whether the cert-manager is installed in the cluster.
 	CertManagerInstalled bool
+	// EnableInPlaceUpdates indicates whether the Cluster API in-place updates should be enabled in the components values.
+	EnableInPlaceUpdates bool
 }
 
 type clusterInterface interface {
@@ -285,8 +287,7 @@ func getWrappedComponents(ctx context.Context, cluster clusterInterface, release
 	}
 
 	remediationSettings := &helmcontrollerv2.InstallRemediation{
-		Retries:              3,
-		RemediateLastFailure: new(true),
+		Retries: -1, // it is up to an operator how to remediate an install failure
 	}
 
 	kcmInfo := cluster.KCMComponentInfo(release, config.KCMHelmReleaseName())
@@ -681,10 +682,8 @@ func reconcileProviderConfigSecret(
 
 		secretName := getProviderConfigSecretName(cmp.name)
 		providerSecret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      secretName,
-				Namespace: namespace,
-			},
+			Name:      secretName,
+			Namespace: namespace,
 		}
 
 		op, err := ctrl.CreateOrUpdate(ctx, rgnlClient, providerSecret, func() error {
