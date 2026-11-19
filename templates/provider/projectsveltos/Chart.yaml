@@ -9,5 +9,5 @@ dependencies:
     version: 1.17.0
     repository: https://projectsveltos.github.io/helm-charts
   - name: projectsveltos
-    version: 1.17.0
-    repository: https://projectsveltos.github.io/helm-charts
+    version: 1.17.1-no-classifier-manager
+    repository: oci://ghcr.io/wahabmk

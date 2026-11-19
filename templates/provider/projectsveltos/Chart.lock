@@ -3,7 +3,7 @@ dependencies:
   repository: https://projectsveltos.github.io/helm-charts
   version: 1.17.0
 - name: projectsveltos
-  repository: https://projectsveltos.github.io/helm-charts
-  version: 1.17.0
-digest: sha256:e9a7466bba3d3ecb3b7a085ef0cb05cc475960a2e8a1bff4867176a4189aa3ce
-generated: "2026-11-04T00:01:31.875697-05:00"
+  repository: oci://ghcr.io/wahabmk
+  version: 1.17.1-no-classifier-manager
+digest: sha256:2c7ead15b99a9491fb5a71bd3ed0e939e55f349ffa78ad4b00551130bf0704da
+generated: "2026-11-19T17:54:09.764305-05:00"
